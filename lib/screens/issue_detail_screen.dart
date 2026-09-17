@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timeago/timeago.dart' as timeago;
+import '../services/severity_engine.dart';
 
 class IssueDetailScreen extends StatefulWidget {
   final Map<String, dynamic> issue;
@@ -210,26 +211,279 @@ class _IssueDetailScreenState extends State<IssueDetailScreen> {
 
   bool _isSlaBreached() {
     final elapsed = _calculateTimeElapsed();
-    final slaHours = _issue['sla_target_hours'] ?? _issue['sla_hours'] ?? 72;
-    return elapsed.inHours > slaHours && _issue['status'] != 'community_verified' && _issue['status'] != 'resolved_by_worker';
+    final score = SeverityEngine.getScoreForIssue(_issue);
+    final tier = SeverityEngine.getSeverityTier(score);
+    final slaHours = _issue['sla_target_hours'] ?? SeverityEngine.getSlaTargetHours(tier);
+    return elapsed.inHours > slaHours &&
+        _issue['status'] != 'community_verified' &&
+        _issue['status'] != 'resolved_by_worker';
   }
 
   Map<String, dynamic> _getSeverityInfo() {
-    final level = _issue['severity_level']?.toString().toUpperCase() ?? 'S3';
-    final score = (_issue['severity_score'] is num) ? (_issue['severity_score'] as num).toDouble() : 50.0;
+    final score = SeverityEngine.getScoreForIssue(_issue);
+    final tier = SeverityEngine.getSeverityTier(score);
+    final color = SeverityEngine.getTierColor(tier);
+    final label = SeverityEngine.getTierLabel(tier);
+    final sla = SeverityEngine.getSlaLabel(tier);
+    final slaHours = SeverityEngine.getSlaTargetHours(tier);
 
-    switch (level) {
-      case 'S5':
-        return {'label': 'S5 - Critical (गंभीर)', 'color': Colors.red.shade700, 'sla': '4 Hours', 'score': score};
-      case 'S4':
-        return {'label': 'S4 - High (उच्च)', 'color': Colors.deepOrange.shade600, 'sla': '12 Hours', 'score': score};
-      case 'S3':
-        return {'label': 'S3 - Moderate (मध्यम)', 'color': Colors.amber.shade800, 'sla': '48 Hours', 'score': score};
-      case 'S2':
-        return {'label': 'S2 - Low (निम्न)', 'color': Colors.blue.shade600, 'sla': '7 Days', 'score': score};
-      default:
-        return {'label': 'S1 - Minimal (सामान्य)', 'color': Colors.teal.shade600, 'sla': '14 Days', 'score': score};
-    }
+    return {
+      'score': score,
+      'tier': tier,
+      'color': color,
+      'label': label,
+      'sla': sla,
+      'slaHours': slaHours,
+    };
+  }
+
+  void _openGroundSurveyModal(BuildContext context) {
+    String hazardLevel = 'moderate'; // 'minimal', 'moderate', 'high', 'lethal'
+    String trafficBlockage = 'none'; // 'none', 'partial', 'full_closure'
+    bool nearVulnerableZone = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (modalContext, setModalState) {
+            final theme = Theme.of(context);
+            final isDark = theme.brightness == Brightness.dark;
+
+            final modifier = SeverityEngine.calculateGroundSurveyModifier(
+              groundHazardLevel: hazardLevel,
+              trafficBlockage: trafficBlockage,
+              isNearVulnerableZone: nearVulnerableZone,
+            );
+
+            final category = _issue['category']?.toString() ?? 'pothole';
+            final urgency = (_issue['urgency_level'] as num?)?.toInt() ?? 3;
+            final affected = (_issue['affected_people'] as num?)?.toInt() ?? 10;
+            final createdAt = DateTime.tryParse(_issue['created_at']?.toString() ?? '');
+
+            final updatedScore = SeverityEngine.calculateSeverityScore(
+              category: category,
+              urgencyLevel: urgency,
+              affectedPeople: affected,
+              upvotes: _upvoteCount,
+              createdAt: createdAt,
+              hasGroundSurvey: true,
+              groundHazardModifier: modifier,
+            );
+
+            final currentScore = SeverityEngine.getScoreForIssue(_issue);
+            final updatedTier = SeverityEngine.getSeverityTier(updatedScore);
+            final updatedTierColor = SeverityEngine.getTierColor(updatedTier);
+            final updatedSla = SeverityEngine.getSlaLabel(updatedTier);
+
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(modalContext).viewInsets.bottom,
+                top: 20,
+                left: 16,
+                right: 16,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.shade100,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(Icons.bolt, color: Colors.amber.shade900, size: 24),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '2-Hour Rapid On-Site Survey',
+                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                              ),
+                              Text(
+                                'Ground Truth Hazard Audit (+50 XP)',
+                                style: TextStyle(fontSize: 12, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    // 1. Hazard Severity Factor
+                    const Text('1. On-Site Hazard Severity (खतरे की गंभीरता)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 6),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(value: 'minimal', label: Text('Minimal\n-10 pts', textAlign: TextAlign.center, style: TextStyle(fontSize: 10))),
+                        ButtonSegment(value: 'moderate', label: Text('Moderate\n0 pts', textAlign: TextAlign.center, style: TextStyle(fontSize: 10))),
+                        ButtonSegment(value: 'high', label: Text('High\n+10 pts', textAlign: TextAlign.center, style: TextStyle(fontSize: 10))),
+                        ButtonSegment(value: 'lethal', label: Text('Lethal\n+20 pts', textAlign: TextAlign.center, style: TextStyle(fontSize: 10))),
+                      ],
+                      selected: {hazardLevel},
+                      onSelectionChanged: (set) {
+                        setModalState(() => hazardLevel = set.first);
+                      },
+                    ),
+                    const SizedBox(height: 14),
+
+                    // 2. Traffic Blockage
+                    const Text('2. Traffic / Transit Blockage (यातायात रुकावट)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 6),
+                    SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment(value: 'none', label: Text('No Blockage\n0 pts', textAlign: TextAlign.center, style: TextStyle(fontSize: 11))),
+                        ButtonSegment(value: 'partial', label: Text('Partial\n+5 pts', textAlign: TextAlign.center, style: TextStyle(fontSize: 11))),
+                        ButtonSegment(value: 'full_closure', label: Text('Full Road Close\n+15 pts', textAlign: TextAlign.center, style: TextStyle(fontSize: 11))),
+                      ],
+                      selected: {trafficBlockage},
+                      onSelectionChanged: (set) {
+                        setModalState(() => trafficBlockage = set.first);
+                      },
+                    ),
+                    const SizedBox(height: 14),
+
+                    // 3. Vulnerable Zone Proximity Checkbox
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Near School / Hospital / Metro Transit (+10 pts)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      subtitle: const Text('Within 200 meters of high-density pedestrian zone', style: TextStyle(fontSize: 11)),
+                      value: nearVulnerableZone,
+                      activeThumbColor: Colors.amber.shade800,
+                      onChanged: (val) {
+                        setModalState(() => nearVulnerableZone = val);
+                      },
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Live Calculated Modifier & Score Preview
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isDark ? theme.colorScheme.surfaceContainerHighest : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: updatedTierColor.withValues(alpha: 0.5)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Ground Modifier: ${modifier >= 0 ? '+$modifier' : '$modifier'} pts', style: TextStyle(fontWeight: FontWeight.bold, color: updatedTierColor)),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(color: updatedTierColor, borderRadius: BorderRadius.circular(12)),
+                                child: Text('$updatedTier ($updatedScore / 100)', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text('Score Update: ${currentScore.toStringAsFixed(1)} ➔ ${updatedScore.toStringAsFixed(1)} | SLA Target: $updatedSla', style: const TextStyle(fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Submit Survey Button
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: theme.colorScheme.primary,
+                        foregroundColor: theme.colorScheme.onPrimary,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      icon: const Icon(Icons.check_circle_rounded),
+                      label: const Text('SUBMIT GROUND AUDIT (+50 XP) / दर्ज करें', style: TextStyle(fontWeight: FontWeight.bold)),
+                      onPressed: () async {
+                        final userId = Supabase.instance.client.auth.currentUser?.id;
+                        if (userId == null) return;
+
+                        try {
+                          // Update issue table with verified ground truth
+                          await Supabase.instance.client.from('issues').update({
+                            'severity_score': updatedScore,
+                            'severity_tier': updatedTier,
+                            'severity_level': updatedTier,
+                            'sla_target_hours': SeverityEngine.getSlaTargetHours(updatedTier),
+                            'has_ground_survey': true,
+                            'ground_hazard_modifier': modifier,
+                            'ground_hazard_level': hazardLevel,
+                            'traffic_blockage': trafficBlockage,
+                            'is_near_vulnerable_zone': nearVulnerableZone,
+                            'surveyed_by': userId,
+                            'surveyed_at': DateTime.now().toIso8601String(),
+                          }).eq('id', _issue['id']);
+
+                          // Award +50 XP to the surveyor
+                          try {
+                            await Supabase.instance.client.rpc('increment_reputation', params: {
+                              'user_id': userId,
+                              'points_to_add': 50,
+                            });
+                          } catch (_) {
+                            // Direct update fallback
+                            final profile = await Supabase.instance.client
+                                .from('profiles')
+                                .select('reputation_points')
+                                .eq('id', userId)
+                                .maybeSingle();
+                            final curPoints = (profile?['reputation_points'] as num?)?.toInt() ?? 10;
+                            await Supabase.instance.client
+                                .from('profiles')
+                                .update({'reputation_points': curPoints + 50})
+                                .eq('id', userId);
+                          }
+
+                          if (modalContext.mounted) {
+                            Navigator.pop(modalContext);
+                          }
+
+                          if (mounted) {
+                            setState(() {
+                              _issue['severity_score'] = updatedScore;
+                              _issue['severity_tier'] = updatedTier;
+                              _issue['severity_level'] = updatedTier;
+                              _issue['sla_target_hours'] = SeverityEngine.getSlaTargetHours(updatedTier);
+                              _issue['has_ground_survey'] = true;
+                              _issue['ground_hazard_modifier'] = modifier;
+                            });
+
+                            ScaffoldMessenger.of(this.context).showSnackBar(
+                              const SnackBar(
+                                backgroundColor: Colors.green,
+                                content: Text('⚡ Ground survey submitted! Priority updated & +50 XP awarded!'),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(this.context).showSnackBar(
+                              SnackBar(backgroundColor: Colors.red, content: Text('Survey submission failed: $e')),
+                            );
+                          }
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _shareIssue() {
@@ -334,6 +588,298 @@ class _IssueDetailScreenState extends State<IssueDetailScreen> {
             const SizedBox(height: 24),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildRapidSurveyCard(ThemeData theme, bool isDark) {
+    final createdAt = DateTime.tryParse(_issue['created_at']?.toString() ?? '');
+    final inWindow = SeverityEngine.isWithinTwoHourSurveyWindow(createdAt);
+    final remainingMins = SeverityEngine.remainingSurveyMinutes(createdAt);
+    final remainingTimeStr = SeverityEngine.formatRemainingSurveyTime(createdAt);
+    final hasSurvey = _issue['has_ground_survey'] == true || _issue['ground_survey'] != null;
+    final groundModifier = (_issue['ground_hazard_modifier'] as num?)?.toDouble() ?? 0.0;
+
+    if (hasSurvey) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isDark ? Colors.teal.shade900.withValues(alpha: 0.3) : Colors.teal.shade50,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.teal.shade400, width: 1.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.verified_user, color: Colors.teal, size: 22),
+                const SizedBox(width: 8),
+                const Text(
+                  'Ground Truth Audit Completed',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.teal),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(color: Colors.teal, borderRadius: BorderRadius.circular(12)),
+                  child: Text(
+                    '${groundModifier >= 0 ? '+$groundModifier' : '$groundModifier'} pts applied',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'On-site inspection conducted. Hazard parameters integrated into the municipal dispatch queue.',
+              style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurface),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.teal,
+                side: const BorderSide(color: Colors.teal),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              icon: const Icon(Icons.edit_note, size: 18),
+              label: const Text('Update Ground Audit / पुनर्परीक्षण करें', style: TextStyle(fontSize: 12)),
+              onPressed: () => _openGroundSurveyModal(context),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (inWindow) {
+      final progress = (120 - remainingMins) / 120.0;
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isDark ? Colors.amber.shade900.withValues(alpha: 0.25) : Colors.amber.shade50,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.amber.shade700, width: 2),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade800,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.bolt, color: Colors.white, size: 20),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '⚡ 2-Hour Rapid On-Site Survey Active',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      Text(
+                        'Fast ground-truth verification window (2 घंटे की त्वरित जांच)',
+                        style: TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade800,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    remainingTimeStr,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: progress.clamp(0.0, 1.0),
+                backgroundColor: isDark ? Colors.grey.shade800 : Colors.amber.shade200,
+                color: Colors.amber.shade800,
+                minHeight: 6,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Are you near this location? Conduct the 2-hour rapid ground audit to calibrate hazard priority, set statutory SLA, and earn +50 XP reputation reward!',
+              style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurface),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber.shade800,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(Icons.speed, size: 18),
+              label: const Text('CONDUCT 2-HOUR RAPID SURVEY (+50 XP)', style: TextStyle(fontWeight: FontWeight.bold)),
+              onPressed: () => _openGroundSurveyModal(context),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? theme.colorScheme.surfaceContainerHighest : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.schedule, color: theme.colorScheme.onSurfaceVariant, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('2-Hour Rapid Survey Concluded', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                Text(
+                  'Initial 120-min window closed. You can still audit ground conditions.',
+                  style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => _openGroundSurveyModal(context),
+            child: const Text('Audit Now'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMathematicalSeverityCard(ThemeData theme, bool isDark) {
+    final category = _issue['category']?.toString() ?? 'pothole';
+    final urgency = (_issue['urgency_level'] as num?)?.toInt() ?? 3;
+    final affected = (_issue['affected_people'] as num?)?.toInt() ?? 10;
+    final createdAt = DateTime.tryParse(_issue['created_at']?.toString() ?? '');
+    final hasSurvey = _issue['has_ground_survey'] == true || _issue['ground_survey'] != null;
+    final groundModifier = (_issue['ground_hazard_modifier'] as num?)?.toDouble() ?? 0.0;
+
+    final score = SeverityEngine.calculateSeverityScore(
+      category: category,
+      urgencyLevel: urgency,
+      affectedPeople: affected,
+      upvotes: _upvoteCount,
+      createdAt: createdAt,
+      hasGroundSurvey: hasSurvey,
+      groundHazardModifier: groundModifier,
+    );
+    final tier = SeverityEngine.getSeverityTier(score);
+    final tierColor = SeverityEngine.getTierColor(tier);
+    final tierLabel = SeverityEngine.getTierLabel(tier);
+    final slaLabel = SeverityEngine.getSlaLabel(tier);
+
+    final wCat = (SeverityEngine.categoryBaseWeights[category] ?? 50.0) * 0.35;
+    final wUrgency = ((urgency.clamp(1, 5) / 5.0) * 100.0) * 0.25;
+    final wAffected = ((affected.clamp(1, 500) / 500.0) * 100.0) * 0.15;
+    final wCommunity = ((_upvoteCount.clamp(0, 100) / 100.0) * 100.0) * 0.15;
+    double wTime = 0.0;
+    if (createdAt != null) {
+      final hoursOpen = DateTime.now().difference(createdAt).inHours;
+      wTime = ((hoursOpen.clamp(0, 72) / 72.0) * 100.0) * 0.10;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? theme.colorScheme.surfaceContainerHighest : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: tierColor.withValues(alpha: 0.5), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: isDark ? Colors.black26 : Colors.grey.shade200,
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.functions, color: tierColor, size: 22),
+                  const SizedBox(width: 8),
+                  const Text('Severity Mathematical Model', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: tierColor,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '$tier • ${score.toStringAsFixed(1)} / 100',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Dynamic Priority Tier: $tierLabel',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: theme.colorScheme.onSurface),
+          ),
+          Text(
+            'Statutory Resolution SLA: $slaLabel',
+            style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 14),
+
+          // Sub-factor breakdown items
+          _buildFactorRow('Hazard Category Weight (35%)', '${wCat.toStringAsFixed(1)} pts', isDark),
+          _buildFactorRow('Urgency Level ($urgency/5) (25%)', '${wUrgency.toStringAsFixed(1)} pts', isDark),
+          _buildFactorRow('Citizens Affected ($affected) (15%)', '${wAffected.toStringAsFixed(1)} pts', isDark),
+          _buildFactorRow('Community Upvotes ($_upvoteCount) (15%)', '${wCommunity.toStringAsFixed(1)} pts', isDark),
+          _buildFactorRow('Aging Time Open Factor (10%)', '${wTime.toStringAsFixed(1)} pts', isDark),
+          if (hasSurvey)
+            _buildFactorRow('Ground Truth Audit Modifier', '${groundModifier >= 0 ? '+$groundModifier' : '$groundModifier'} pts', isDark, isBold: true, highlightColor: Colors.teal),
+
+          const Divider(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Composite Calculated Score:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              Text('${score.toStringAsFixed(1)} / 100.0', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: tierColor)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFactorRow(String label, String value, bool isDark, {bool isBold = false, Color? highlightColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2.5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontSize: 12, color: isDark ? Colors.grey.shade400 : Colors.grey.shade700, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+          Text(value, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: highlightColor)),
+        ],
       ),
     );
   }
@@ -487,7 +1033,7 @@ class _IssueDetailScreenState extends State<IssueDetailScreen> {
                   const SizedBox(height: 16),
 
                   // Address info if present
-                  if (_issue['address'] != null)
+                  if (_issue['address'] != null) ...[
                     Row(
                       children: [
                         const Icon(Icons.location_on, size: 18, color: Colors.red),
@@ -500,6 +1046,15 @@ class _IssueDetailScreenState extends State<IssueDetailScreen> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // 2-HOUR RAPID ON-SITE SURVEY CARD
+                  _buildRapidSurveyCard(theme, isDark),
+                  const SizedBox(height: 14),
+
+                  // MATHEMATICAL SEVERITY BREAKDOWN CARD
+                  _buildMathematicalSeverityCard(theme, isDark),
 
                   const Divider(height: 32),
 

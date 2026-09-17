@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timeago/timeago.dart' as timeago;
+import '../services/severity_engine.dart';
 import 'report_issue_screen.dart';
 import 'issue_detail_screen.dart';
 import 'leaderboard_screen.dart';
@@ -21,6 +22,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   final MapController _mapController = MapController();
 
   String _selectedFilter = 'all';
+  String _sortMode = 'highest_severity'; // 'highest_severity', 'rapid_survey', 'overdue_sla', 'newest'
   Map<String, dynamic>? _userProfile;
   double _currentZoom = 13.0;
   LatLng _mapCenter = const LatLng(28.6139, 77.2090);
@@ -307,6 +309,25 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
+  Widget _prioritySortChip(String mode, String label, IconData icon, Color color) {
+    final isSelected = _sortMode == mode;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8.0),
+      child: ChoiceChip(
+        selected: isSelected,
+        avatar: Icon(icon, size: 16, color: isSelected ? Colors.white : color),
+        label: Text(label),
+        labelStyle: TextStyle(
+          color: isSelected ? Colors.white : Theme.of(context).colorScheme.onSurface,
+          fontWeight: FontWeight.bold,
+          fontSize: 11,
+        ),
+        selectedColor: color,
+        onSelected: (val) => setState(() => _sortMode = mode),
+      ),
+    );
+  }
+
   Widget _buildIssueFeedCard(BuildContext context, Map<String, dynamic> item) {
     final color = _getCategoryColor(item['category'] ?? '');
     final icon = _getCategoryIcon(item['category'] ?? '');
@@ -315,12 +336,23 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final statusLabel = _getStatusLabel(status);
     final statusIcon = _getStatusIcon(status);
 
+    // Severity Math Engine
+    final score = SeverityEngine.getScoreForIssue(item);
+    final tier = SeverityEngine.getSeverityTier(score);
+    final tierColor = SeverityEngine.getTierColor(tier);
+    final slaLabel = SeverityEngine.getSlaLabel(tier);
+
+    // 2-Hour Rapid Survey Check
+    final createdAt = DateTime.tryParse(item['created_at']?.toString() ?? '');
+    final inSurveyWindow = SeverityEngine.isWithinTwoHourSurveyWindow(createdAt);
+    final remainingSurveyStr = SeverityEngine.formatRemainingSurveyTime(createdAt);
+    final hasSurvey = item['has_ground_survey'] == true || item['ground_survey'] != null;
+
     // Timeago
     String timeAgoStr = '';
-    if (item['created_at'] != null) {
+    if (createdAt != null) {
       try {
-        final dt = DateTime.parse(item['created_at'].toString());
-        timeAgoStr = timeago.format(dt);
+        timeAgoStr = timeago.format(createdAt.toLocal());
       } catch (_) {}
     }
 
@@ -400,6 +432,30 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     ),
                   ),
                 ),
+                // 2-Hour Rapid Survey Active Floating Pill
+                if (inSurveyWindow && !hasSurvey)
+                  Positioned(
+                    bottom: 10,
+                    left: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade900.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 4)],
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.bolt, color: Colors.amberAccent, size: 16),
+                          const SizedBox(width: 4),
+                          Text(
+                            '⚡ 2-Hr Survey: $remainingSurveyStr (+50 XP)',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
             Padding(
@@ -407,6 +463,70 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Severity & SLA Target Bar
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: tierColor.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: tierColor.withValues(alpha: 0.5)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.priority_high, size: 14, color: tierColor),
+                            const SizedBox(width: 2),
+                            Text(
+                              '$tier (${score.toStringAsFixed(1)})',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: tierColor),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.timer_outlined, size: 14),
+                            const SizedBox(width: 3),
+                            Text(
+                              'SLA: $slaLabel',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (hasSurvey) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.teal.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.teal.shade300),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.verified, size: 13, color: Colors.teal.shade700),
+                              const SizedBox(width: 2),
+                              Text(
+                                'Audited',
+                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.teal.shade800),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
                   Text(
                     item['title'] ?? 'Civic Issue',
                     style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
@@ -437,20 +557,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                             Text(
                               timeAgoStr,
                               style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                            ),
-                            const SizedBox(width: 8),
-                          ],
-                          if (item['severity_level'] != null) ...[
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.red.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                item['severity_level'].toString().toUpperCase(),
-                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.red),
-                              ),
                             ),
                             const SizedBox(width: 8),
                           ],
@@ -638,9 +744,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         if (snapshot.hasError) {
           return Center(child: Text('Error: ${snapshot.error}'));
         }
-        final issues = snapshot.data ?? [];
+        final rawIssues = snapshot.data ?? [];
 
-        if (issues.isEmpty) {
+        if (rawIssues.isEmpty) {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(24.0),
@@ -660,15 +766,46 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           );
         }
 
+        // Apply intelligent priority and rapid survey triage sorting
+        final sortedIssues = SeverityEngine.sortIssues(issues: rawIssues, sortMode: _sortMode);
+
         return RefreshIndicator(
           onRefresh: () async {
             _loadUserProfile();
             setState(() {});
           },
-          child: ListView.builder(
-            itemCount: issues.length,
-            padding: const EdgeInsets.all(12),
-            itemBuilder: (context, index) => _buildIssueFeedCard(context, issues[index]),
+          child: Column(
+            children: [
+              // PRIORITY TRIAGE & RAPID SURVEY SORTING BAR
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                  border: Border(bottom: BorderSide(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5))),
+                ),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      const Text('Triage: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      _prioritySortChip('highest_severity', '🔥 Severity (S5-S1)', Icons.local_fire_department, Colors.red.shade700),
+                      _prioritySortChip('rapid_survey', '⚡ 2-Hr Rapid Survey Active', Icons.bolt, Colors.amber.shade800),
+                      _prioritySortChip('overdue_sla', '⏰ Overdue SLA', Icons.warning_amber_rounded, Colors.deepOrange),
+                      _prioritySortChip('newest', '🕒 Most Recent', Icons.schedule, Colors.blue),
+                    ],
+                  ),
+                ),
+              ),
+
+              // ISSUE FEED LIST
+              Expanded(
+                child: ListView.builder(
+                  itemCount: sortedIssues.length,
+                  padding: const EdgeInsets.all(12),
+                  itemBuilder: (context, index) => _buildIssueFeedCard(context, sortedIssues[index]),
+                ),
+              ),
+            ],
           ),
         );
       },

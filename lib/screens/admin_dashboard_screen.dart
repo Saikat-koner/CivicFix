@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timeago/timeago.dart' as timeago;
+import '../services/severity_engine.dart';
 import 'issue_detail_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
@@ -13,6 +14,7 @@ class AdminDashboardScreen extends StatefulWidget {
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   String _searchQuery = '';
   String _selectedStatusFilter = 'all';
+  String _sortMode = 'highest_severity';
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -142,19 +144,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Map<String, dynamic> _getSeverityInfo(Map<String, dynamic> issue) {
-    final level = issue['severity_level']?.toString().toUpperCase() ?? 'S3';
-    switch (level) {
-      case 'S5':
-        return {'label': 'S5 Critical', 'color': Colors.red.shade700};
-      case 'S4':
-        return {'label': 'S4 High', 'color': Colors.deepOrange.shade600};
-      case 'S3':
-        return {'label': 'S3 Moderate', 'color': Colors.amber.shade800};
-      case 'S2':
-        return {'label': 'S2 Low', 'color': Colors.blue.shade600};
-      default:
-        return {'label': 'S1 Minimal', 'color': Colors.teal.shade600};
-    }
+    final score = SeverityEngine.getScoreForIssue(issue);
+    final tier = SeverityEngine.getSeverityTier(score);
+    final color = SeverityEngine.getTierColor(tier);
+    final label = '$tier (${score.toStringAsFixed(1)})';
+    final slaLabel = SeverityEngine.getSlaLabel(tier);
+    return {
+      'score': score,
+      'tier': tier,
+      'label': label,
+      'color': color,
+      'sla': slaLabel,
+    };
   }
 
   @override
@@ -189,6 +190,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           final int inProgress = allIssues.where((i) => i['status'] == 'in_progress').length;
           final int pending = total - resolved;
 
+          // Rapid 2-Hour Survey Active Count
+          final rapidSurveyActiveCount = allIssues.where((i) {
+            final dt = DateTime.tryParse(i['created_at']?.toString() ?? '');
+            final isNotResolved = i['status'] != 'resolved_by_worker' && i['status'] != 'community_verified';
+            return isNotResolved && SeverityEngine.isWithinTwoHourSurveyWindow(dt);
+          }).length;
+
+          // Critical S5 Issues Count
+          final criticalCount = allIssues.where((i) {
+            final score = SeverityEngine.getScoreForIssue(i);
+            return SeverityEngine.getSeverityTier(score) == 'S5';
+          }).length;
+
           // Filter by search query and status filter
           final filteredIssues = allIssues.where((issue) {
             final title = (issue['title'] ?? '').toString().toLowerCase();
@@ -204,12 +218,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 address.contains(_searchQuery);
 
             final matchesStatus = _selectedStatusFilter == 'all' ||
+                (_selectedStatusFilter == 'rapid_survey' && SeverityEngine.isWithinTwoHourSurveyWindow(DateTime.tryParse(issue['created_at']?.toString() ?? ''))) ||
+                (_selectedStatusFilter == 'critical_s5' && SeverityEngine.getSeverityTier(SeverityEngine.getScoreForIssue(issue)) == 'S5') ||
                 (_selectedStatusFilter == 'pending' && (status == 'reported' || status == 'open')) ||
                 (_selectedStatusFilter == 'in_progress' && status == 'in_progress') ||
                 (_selectedStatusFilter == 'resolved' && (status == 'resolved_by_worker' || status == 'community_verified'));
 
             return matchesQuery && matchesStatus;
           }).toList();
+
+          // Sort filtered issues using SeverityEngine
+          final sortedIssues = SeverityEngine.sortIssues(issues: filteredIssues, sortMode: _sortMode);
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
@@ -221,14 +240,64 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   children: [
                     _kpiCard('Total Reported', '$total', Colors.blue, Icons.folder_open),
                     const SizedBox(width: 8),
-                    _kpiCard('In Progress', '$inProgress', Colors.amber.shade800, Icons.engineering),
+                    _kpiCard('⚡ Rapid Survey', '$rapidSurveyActiveCount', Colors.amber.shade900, Icons.bolt),
                     const SizedBox(width: 8),
-                    _kpiCard('Pending', '$pending', Colors.deepOrange, Icons.pending_actions),
+                    _kpiCard('🔥 S5 Critical', '$criticalCount', Colors.red.shade700, Icons.local_fire_department),
                     const SizedBox(width: 8),
                     _kpiCard('Resolved', '$resolved', Colors.green, Icons.task_alt),
                   ],
                 ),
                 const SizedBox(height: 20),
+
+                // 2-HOUR RAPID SURVEY ACTION QUEUE BANNER
+                if (rapidSurveyActiveCount > 0) ...[
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Colors.amber.shade900, Colors.orange.shade800],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 2))],
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.bolt, color: Colors.amberAccent, size: 36),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '⚡ $rapidSurveyActiveCount Issues in 2-Hour Rapid Survey Window',
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                              const SizedBox(height: 2),
+                              const Text(
+                                'Field officers & citizens can conduct on-site ground audits for +50 XP and real-time SLA calibration.',
+                                style: TextStyle(color: Colors.white70, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.amber.shade900,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          onPressed: () {
+                            setState(() => _selectedStatusFilter = 'rapid_survey');
+                          },
+                          child: const Text('View Queue', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
 
                 // SLA Breached Hearings Section
                 StreamBuilder<List<Map<String, dynamic>>>(
@@ -298,7 +367,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
 
                 // Search & Filtering Bar
-                const Text('Manage Municipal Tickets', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text('Manage Municipal Tickets & Triage', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _searchController,
@@ -323,12 +392,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ),
                 const SizedBox(height: 10),
 
-                // Status Filter Chips
+                // Status & Severity Filter Chips
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
                       _statusFilterChip('all', 'All (${allIssues.length})'),
+                      const SizedBox(width: 8),
+                      _statusFilterChip('rapid_survey', '⚡ 2-Hr Survey Active ($rapidSurveyActiveCount)'),
+                      const SizedBox(width: 8),
+                      _statusFilterChip('critical_s5', '🔥 S5 Critical ($criticalCount)'),
                       const SizedBox(width: 8),
                       _statusFilterChip('pending', 'Action Required ($pending)'),
                       const SizedBox(width: 8),
@@ -338,10 +411,32 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 10),
+
+                // Sort Mode Row
+                Row(
+                  children: [
+                    const Text('Sort by: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    DropdownButton<String>(
+                      value: _sortMode,
+                      isDense: true,
+                      style: TextStyle(fontSize: 12, color: theme.colorScheme.primary, fontWeight: FontWeight.bold),
+                      items: const [
+                        DropdownMenuItem(value: 'highest_severity', child: Text('🔥 Severity (S5-S1)')),
+                        DropdownMenuItem(value: 'rapid_survey', child: Text('⚡ Rapid Survey First')),
+                        DropdownMenuItem(value: 'overdue_sla', child: Text('⏰ Overdue SLA First')),
+                        DropdownMenuItem(value: 'newest', child: Text('🕒 Most Recent')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) setState(() => _sortMode = val);
+                      },
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 16),
 
                 // Issues List
-                if (filteredIssues.isEmpty)
+                if (sortedIssues.isEmpty)
                   Center(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 36.0),
@@ -361,13 +456,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   ListView.separated(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
-                    itemCount: filteredIssues.length,
+                    itemCount: sortedIssues.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 12),
                     itemBuilder: (ctx, idx) {
-                      final item = filteredIssues[idx];
+                      final item = sortedIssues[idx];
                       final severity = _getSeverityInfo(item);
                       final status = item['status']?.toString() ?? 'reported';
                       final isResolved = status == 'resolved_by_worker' || status == 'community_verified';
+
+                      // 2-Hour Rapid Survey Check
+                      final createdAt = DateTime.tryParse(item['created_at']?.toString() ?? '');
+                      final inSurveyWindow = SeverityEngine.isWithinTwoHourSurveyWindow(createdAt);
+                      final remainingSurveyStr = SeverityEngine.formatRemainingSurveyTime(createdAt);
+                      final hasGroundSurvey = item['has_ground_survey'] == true || item['ground_survey'] != null;
 
                       // Timeago
                       String timeAgoStr = '';
@@ -417,6 +518,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                       decoration: BoxDecoration(
                                         color: (severity['color'] as Color).withValues(alpha: 0.15),
                                         borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: (severity['color'] as Color).withValues(alpha: 0.5)),
                                       ),
                                       child: Text(
                                         severity['label'] as String,
@@ -462,6 +564,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                             : Colors.amber.withValues(alpha: 0.15),
                                       ),
                                     ),
+                                    Chip(
+                                      visualDensity: VisualDensity.compact,
+                                      avatar: const Icon(Icons.timer_outlined, size: 14),
+                                      label: Text('SLA: ${severity['sla']}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                    ),
+                                    if (inSurveyWindow && !isResolved)
+                                      Chip(
+                                        visualDensity: VisualDensity.compact,
+                                        avatar: const Icon(Icons.bolt, size: 14, color: Colors.amberAccent),
+                                        backgroundColor: Colors.amber.shade900,
+                                        label: Text(
+                                          '⚡ Survey: $remainingSurveyStr',
+                                          style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    if (hasGroundSurvey)
+                                      Chip(
+                                        visualDensity: VisualDensity.compact,
+                                        avatar: const Icon(Icons.verified, size: 14, color: Colors.teal),
+                                        backgroundColor: Colors.teal.withValues(alpha: 0.15),
+                                        label: const Text(
+                                          'Audited Ground Truth',
+                                          style: TextStyle(fontSize: 11, color: Colors.teal, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
                                     if (timeAgoStr.isNotEmpty)
                                       Chip(
                                         visualDensity: VisualDensity.compact,

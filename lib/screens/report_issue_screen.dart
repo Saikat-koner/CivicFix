@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart' as latlong;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/severity_engine.dart';
 import 'osm_picker_screen.dart';
 
 class ReportIssueScreen extends StatefulWidget {
@@ -275,6 +276,16 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
           ? _resolvedAddress
           : 'Lat: ${_currentPosition!.latitude.toStringAsFixed(4)}, Lng: ${_currentPosition!.longitude.toStringAsFixed(4)}';
 
+      final calculatedScore = SeverityEngine.calculateSeverityScore(
+        category: _selectedCategory,
+        urgencyLevel: _urgencyLevel,
+        affectedPeople: _affectedPeople,
+        upvotes: 0,
+        createdAt: DateTime.now(),
+      );
+      final calculatedTier = SeverityEngine.getSeverityTier(calculatedScore);
+      final slaHours = SeverityEngine.getSlaTargetHours(calculatedTier);
+
       Map<String, dynamic>? response;
       try {
         final rpcRes = await supabase.rpc('check_and_create_issue', params: {
@@ -286,6 +297,8 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
           'p_longitude': _currentPosition!.longitude,
           'p_latitude': _currentPosition!.latitude,
           'p_address': address,
+          'p_severity_score': calculatedScore,
+          'p_severity_tier': calculatedTier,
         });
         response = rpcRes is Map<String, dynamic> ? rpcRes : null;
       } catch (_) {
@@ -302,6 +315,12 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
           'status': 'reported',
           'urgency_level': _urgencyLevel,
           'affected_people': _affectedPeople,
+          'severity_score': calculatedScore,
+          'severity_level': calculatedTier,
+          'severity_tier': calculatedTier,
+          'sla_target_hours': slaHours,
+          'has_ground_survey': false,
+          'ground_hazard_modifier': 0.0,
           'created_at': DateTime.now().toIso8601String(),
         });
       }
@@ -647,7 +666,11 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                     ),
                     const SizedBox(height: 24),
 
-                    // 7. SUBMISSION BUTTON
+                    // 7. LIVE SEVERITY & 2-HOUR RAPID SURVEY PREVIEW
+                    _buildSeverityPreviewCard(theme, isDark),
+                    const SizedBox(height: 24),
+
+                    // 8. SUBMISSION BUTTON
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size.fromHeight(56),
@@ -667,6 +690,119 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildSeverityPreviewCard(ThemeData theme, bool isDark) {
+    final liveScore = SeverityEngine.calculateSeverityScore(
+      category: _selectedCategory,
+      urgencyLevel: _urgencyLevel,
+      affectedPeople: _affectedPeople,
+      upvotes: 0,
+      createdAt: DateTime.now(),
+    );
+    final tier = SeverityEngine.getSeverityTier(liveScore);
+    final tierColor = SeverityEngine.getTierColor(tier);
+    final tierLabel = SeverityEngine.getTierLabel(tier);
+    final slaLabel = SeverityEngine.getSlaLabel(tier);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? theme.colorScheme.surfaceContainerHighest : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: tierColor.withValues(alpha: 0.5),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: tierColor.withValues(alpha: 0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.analytics_rounded, color: tierColor, size: 22),
+              const SizedBox(width: 8),
+              const Text(
+                'AI & Math Severity Prediction',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: tierColor,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '$tier (${liveScore.toStringAsFixed(1)} / 100)',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Tier: $tierLabel',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: theme.colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Statutory Resolution SLA: $slaLabel',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: isDark ? Colors.amber.shade900.withValues(alpha: 0.2) : Colors.amber.shade50,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.amber.shade700.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.bolt, color: Colors.amber.shade800, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '⚡ 2-Hour Rapid On-Site Survey opens upon submission for fast verification & ground hazard audit.',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.amber.shade200 : Colors.amber.shade900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

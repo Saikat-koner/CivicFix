@@ -14,6 +14,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int _totalReported = 0;
   int _totalResolved = 0;
   int _totalUpvotes = 0;
+  int _totalGroundSurveys = 0;
 
   @override
   void initState() {
@@ -40,11 +41,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // 2. Fetch User's Issues Stats
       final issuesRes = await Supabase.instance.client
           .from('issues')
-          .select('id, status, upvotes_count')
+          .select('id, status, upvotes_count, has_ground_survey, ground_survey')
           .eq('user_id', user.id);
 
       int resolved = 0;
       int upvotes = 0;
+      int groundSurveys = 0;
       final issuesList = issuesRes as List<dynamic>? ?? [];
       for (var issue in issuesList) {
         final status = issue['status']?.toString();
@@ -52,6 +54,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           resolved++;
         }
         upvotes += (issue['upvotes_count'] as num?)?.toInt() ?? 0;
+        if (issue['has_ground_survey'] == true || issue['ground_survey'] != null) {
+          groundSurveys++;
+        }
       }
 
       if (mounted) {
@@ -60,6 +65,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _totalReported = issuesList.length;
           _totalResolved = resolved;
           _totalUpvotes = upvotes;
+          _totalGroundSurveys = groundSurveys;
           _loading = false;
         });
       }
@@ -236,9 +242,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 8),
                     Row(
                       children: [
+                        _statCard('⚡ Rapid Audits', '$_totalGroundSurveys', Icons.bolt, Colors.amber.shade900),
+                        const SizedBox(width: 8),
                         _statCard('Citizen XP', '$points', Icons.star, Colors.amber.shade800),
                         const SizedBox(width: 8),
-                        _statCard('Upvotes Given', '$_totalUpvotes', Icons.thumb_up, Colors.deepPurple),
+                        _statCard('Upvotes', '$_totalUpvotes', Icons.thumb_up, Colors.deepPurple),
                       ],
                     ),
                     const SizedBox(height: 20),
@@ -260,6 +268,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ],
                             ),
                             const SizedBox(height: 12),
+                            _badgeRow(
+                              'Rapid Triage Surveyor ⚡',
+                              'Conducted rapid on-site hazard survey within 2 hours (+50 XP)',
+                              _totalGroundSurveys >= 1 || points >= 60,
+                              Icons.bolt,
+                              Colors.amber.shade900,
+                            ),
+                            const Divider(height: 16),
+                            _badgeRow(
+                              'Ground Truth Auditor 🛡️',
+                              'Conducted 3+ on-site ground hazard audits with live modifiers',
+                              _totalGroundSurveys >= 3,
+                              Icons.verified_user,
+                              Colors.teal,
+                            ),
+                            const Divider(height: 16),
                             _badgeRow(
                               'First Responder',
                               'Reported your first civic hazard',
