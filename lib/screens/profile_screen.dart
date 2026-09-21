@@ -17,7 +17,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _profile = widget.profile ??
-        const CitizenProfile(
+        CitizenProfile(
           id: 'CFX-USER-9402',
           name: 'Priya Sharma',
           email: 'priya.sharma@resident.civicfix.in',
@@ -30,7 +30,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           communityUpvotes: 184,
           wardRank: 4,
           verificationAccuracy: 98.5,
-          joinedDate: null as dynamic,
+          joinedDate: DateTime(2025, 6, 15),
         );
   }
 
@@ -272,7 +272,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.between,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Row(
                 children: [
@@ -324,7 +324,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 10),
           Row(
-            mainAxisAlignment: MainAxisAlignment.between,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
                 'Current: ${tier.title}',
@@ -483,7 +483,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.between,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text(
               'Civic Tier Badges',

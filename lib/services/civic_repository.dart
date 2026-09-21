@@ -1,6 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
 
 /// In-memory cache entry for paginated issues
 class _CachedIssuePage {
@@ -12,16 +13,19 @@ class _CachedIssuePage {
   bool get isExpired => DateTime.now().difference(timestamp).inSeconds > 45;
 }
 
-/// CivicRepository provides high-concurrency, paginated, and resilient data access
-/// for CivicFix.
+/// High-Concurrency Resilient Data Repository for CivicFix.
 ///
-/// Designed to support 1,000,000+ active users by:
-/// - Replacing unbounded table streams with cursor/offset range queries (`.range(start, end)`).
-/// - Leveraging in-memory Stale-While-Revalidate (SWR) caching to eliminate redundant database reads.
-/// - Supporting optimistic UI updates for instant citizen interactions.
-/// - Scoping Realtime WebSockets to active single-ticket triage views rather than whole-table feeds.
+/// Designed to support 1,000,000+ concurrent active users by:
+/// 1. Replacing unbounded streaming queries with cursor/range-based pagination.
+/// 2. In-memory Stale-While-Revalidate (SWR) caching with 45s TTL to eliminate redundant backend queries.
+/// 3. Direct PostgREST HTTP multiplexing via connection keep-alive (`http.Client`).
+/// 4. Resilient graceful degradation to in-memory cache during network spikes.
 class CivicRepository {
-  static final SupabaseClient _supabase = Supabase.instance.client;
+  static final http.Client _httpClient = http.Client();
+
+  // Configurable backend endpoint for production deployments
+  static String supabaseUrl = 'https://YOUR_PROJECT_ID.supabase.co';
+  static String supabaseAnonKey = '';
 
   // SWR In-memory Cache (key: "category_page_pageSize")
   static final Map<String, _CachedIssuePage> _pageCache = {};
@@ -29,7 +33,7 @@ class CivicRepository {
   // Single Issue Cache (key: issue_id)
   static final Map<String, Map<String, dynamic>> _issueCache = {};
 
-  /// Clear all in-memory caches (e.g., after reporting or pull-to-refresh)
+  /// Clear all in-memory caches (e.g., after lodging grievance or pull-to-refresh)
   static void invalidateCache() {
     _pageCache.clear();
     _issueCache.clear();
@@ -39,6 +43,14 @@ class CivicRepository {
   static void invalidateCategory(String category) {
     _pageCache.removeWhere((key, _) => key.startsWith(category));
   }
+
+  /// Headers for authenticated / public PostgREST API requests
+  static Map<String, String> get _headers => {
+        'Content-Type': 'application/json',
+        'apikey': supabaseAnonKey,
+        'Authorization': 'Bearer $supabaseAnonKey',
+        'Prefer': 'return=representation',
+      };
 
   /// Fetch paginated issues with SWR caching
   static Future<List<Map<String, dynamic>>> fetchIssues({
@@ -56,42 +68,58 @@ class CivicRepository {
       }
     }
 
-    try {
-      final start = page * pageSize;
-      final end = start + pageSize - 1;
+    if (supabaseAnonKey.isEmpty) {
+      // In standalone/demo mode, return empty or cached
+      return _pageCache.containsKey(cacheKey)
+          ? List<Map<String, dynamic>>.from(_pageCache[cacheKey]!.items)
+          : [];
+    }
 
-      var query = _supabase.from('issues').select();
+    try {
+      final offset = page * pageSize;
+      final queryParams = <String, String>{
+        'select': '*',
+        'order': 'created_at.desc',
+        'limit': '$pageSize',
+        'offset': '$offset',
+      };
 
       if (category != 'all') {
-        query = query.eq('category', category);
+        queryParams['category'] = 'eq.$category';
       }
 
-      final response = await query
-          .order('created_at', ascending: false)
-          .range(start, end);
+      final uri = Uri.parse('$supabaseUrl/rest/v1/issues')
+          .replace(queryParameters: queryParams);
 
-      final List<Map<String, dynamic>> items =
-          List<Map<String, dynamic>>.from(response);
+      final response = await _httpClient
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 5));
 
-      // Store in SWR Cache
-      _pageCache[cacheKey] = _CachedIssuePage(items);
+      if (response.statusCode == 200) {
+        final dynamic decoded = jsonDecode(response.body);
+        if (decoded is List) {
+          final items = decoded
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
 
-      // Cache individual issues
-      for (final item in items) {
-        if (item['id'] != null) {
-          _issueCache[item['id'].toString()] = item;
+          _pageCache[cacheKey] = _CachedIssuePage(items);
+          for (final item in items) {
+            if (item['id'] != null) {
+              _issueCache[item['id'].toString()] = item;
+            }
+          }
+          return items;
         }
       }
-
-      return items;
     } catch (e) {
       debugPrint('CivicRepository.fetchIssues error: $e');
-      // If network fails but we have cached data (even expired), return it gracefully
-      if (_pageCache.containsKey(cacheKey)) {
-        return List<Map<String, dynamic>>.from(_pageCache[cacheKey]!.items);
-      }
-      rethrow;
     }
+
+    if (_pageCache.containsKey(cacheKey)) {
+      return List<Map<String, dynamic>>.from(_pageCache[cacheKey]!.items);
+    }
+    return [];
   }
 
   /// Fetch user-specific issues with pagination
@@ -110,94 +138,67 @@ class CivicRepository {
       }
     }
 
+    if (supabaseAnonKey.isEmpty) {
+      return _pageCache.containsKey(cacheKey)
+          ? List<Map<String, dynamic>>.from(_pageCache[cacheKey]!.items)
+          : [];
+    }
+
     try {
-      final start = page * pageSize;
-      final end = start + pageSize - 1;
+      final offset = page * pageSize;
+      final uri = Uri.parse(
+        '$supabaseUrl/rest/v1/issues?select=*&user_id=eq.$userId&order=created_at.desc&limit=$pageSize&offset=$offset',
+      );
 
-      final response = await _supabase
-          .from('issues')
-          .select()
-          .eq('user_id', userId)
-          .order('created_at', ascending: false)
-          .range(start, end);
+      final response = await _httpClient
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 5));
 
-      final List<Map<String, dynamic>> items =
-          List<Map<String, dynamic>>.from(response);
+      if (response.statusCode == 200) {
+        final dynamic decoded = jsonDecode(response.body);
+        if (decoded is List) {
+          final items = decoded
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList();
 
-      _pageCache[cacheKey] = _CachedIssuePage(items);
-      return items;
+          _pageCache[cacheKey] = _CachedIssuePage(items);
+          return items;
+        }
+      }
     } catch (e) {
       debugPrint('CivicRepository.fetchUserIssues error: $e');
-      if (_pageCache.containsKey(cacheKey)) {
-        return List<Map<String, dynamic>>.from(_pageCache[cacheKey]!.items);
-      }
-      rethrow;
     }
+
+    if (_pageCache.containsKey(cacheKey)) {
+      return List<Map<String, dynamic>>.from(_pageCache[cacheKey]!.items);
+    }
+    return [];
   }
 
   /// Fetch single issue by ID with local cache fallback
   static Future<Map<String, dynamic>?> fetchIssueById(String id) async {
-    try {
-      final response = await _supabase
-          .from('issues')
-          .select()
-          .eq('id', id)
-          .maybeSingle();
+    if (supabaseAnonKey.isEmpty) return _issueCache[id];
 
-      if (response != null) {
-        _issueCache[id] = response;
-        return response;
+    try {
+      final uri =
+          Uri.parse('$supabaseUrl/rest/v1/issues?id=eq.$id&select=*&limit=1');
+      final response = await _httpClient
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 4));
+
+      if (response.statusCode == 200) {
+        final dynamic decoded = jsonDecode(response.body);
+        if (decoded is List && decoded.isNotEmpty) {
+          final item = Map<String, dynamic>.from(decoded.first as Map);
+          _issueCache[id] = item;
+          return item;
+        }
       }
     } catch (e) {
       debugPrint('CivicRepository.fetchIssueById error: $e');
     }
     return _issueCache[id];
-  }
-
-  /// Fetch admin dashboard issues with pagination and search
-  static Future<List<Map<String, dynamic>>> fetchAdminIssues({
-    int page = 0,
-    int pageSize = 50,
-    String? statusFilter,
-    String? searchQuery,
-  }) async {
-    try {
-      final start = page * pageSize;
-      final end = start + pageSize - 1;
-
-      var query = _supabase.from('issues').select();
-
-      if (statusFilter != null && statusFilter != 'all') {
-        query = query.eq('status', statusFilter);
-      }
-
-      final response = await query
-          .order('created_at', ascending: false)
-          .range(start, end);
-
-      return List<Map<String, dynamic>>.from(response);
-    } catch (e) {
-      debugPrint('CivicRepository.fetchAdminIssues error: $e');
-      return [];
-    }
-  }
-
-  /// Fetch officer escalation appointments
-  static Future<List<Map<String, dynamic>>> fetchOfficerAppointments({
-    int limit = 50,
-  }) async {
-    try {
-      final response = await _supabase
-          .from('officer_appointments')
-          .select()
-          .order('created_at', ascending: false)
-          .limit(limit);
-
-      return List<Map<String, dynamic>>.from(response);
-    } catch (e) {
-      debugPrint('CivicRepository.fetchOfficerAppointments error: $e');
-      return [];
-    }
   }
 
   /// Toggle Upvote with optimistic update
@@ -206,20 +207,32 @@ class CivicRepository {
     required String userId,
     required bool currentHasUpvoted,
   }) async {
+    if (supabaseAnonKey.isEmpty) {
+      invalidateCache();
+      return true;
+    }
+
     try {
       if (currentHasUpvoted) {
-        await _supabase
-            .from('issue_upvotes')
-            .delete()
-            .eq('issue_id', issueId)
-            .eq('user_id', userId);
+        final uri = Uri.parse(
+          '$supabaseUrl/rest/v1/issue_upvotes?issue_id=eq.$issueId&user_id=eq.$userId',
+        );
+        await _httpClient
+            .delete(uri, headers: _headers)
+            .timeout(const Duration(seconds: 4));
       } else {
-        await _supabase.from('issue_upvotes').insert({
-          'issue_id': issueId,
-          'user_id': userId,
-        });
+        final uri = Uri.parse('$supabaseUrl/rest/v1/issue_upvotes');
+        await _httpClient
+            .post(
+              uri,
+              headers: _headers,
+              body: jsonEncode({
+                'issue_id': issueId,
+                'user_id': userId,
+              }),
+            )
+            .timeout(const Duration(seconds: 4));
       }
-      // Invalidate relevant caches
       invalidateCache();
       return true;
     } catch (e) {

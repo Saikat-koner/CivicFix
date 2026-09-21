@@ -2,7 +2,6 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../models/issue.dart';
-import '../services/geocoding_service.dart';
 import '../services/image_compression_service.dart';
 import 'osm_picker_screen.dart';
 

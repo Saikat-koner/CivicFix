@@ -1,7 +1,5 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import '../models/issue.dart';
-import '../models/user_profile.dart';
 import 'profile_screen.dart';
 import 'issue_detail_screen.dart';
 import 'report_issue_screen.dart';
@@ -18,7 +16,12 @@ enum FilterStream {
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final bool isGuest;
+
+  const HomeScreen({
+    super.key,
+    this.isGuest = false,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -29,7 +32,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   final TextEditingController _searchController = TextEditingController();
 
   // Guest Exploration Mode
-  bool _isGuestMode = true;
+  late bool _isGuestMode;
 
   String? _selectedCategoryId;
   FilterStream _activeStream = FilterStream.all;
@@ -39,6 +42,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
+    _isGuestMode = widget.isGuest;
     _tabController = TabController(length: 3, vsync: this);
     _issues = _generateInitialIssues();
   }
@@ -300,7 +304,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final isWide = MediaQuery.of(context).size.width >= 768;
 
     final criticalS5Count = _issues.where((i) => i.severity == SeverityLevel.s5 && !i.isResolved).length;
     final rapidSurveyCount = _issues.where((i) => i.isRapidSurveyActive).length;

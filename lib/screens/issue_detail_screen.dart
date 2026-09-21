@@ -283,7 +283,6 @@ class _IssueDetailScreenState extends State<IssueDetailScreen>
     final isDark = theme.brightness == Brightness.dark;
     final severity = _currentIssue.severity;
     final category = _currentIssue.category;
-    final isBreached = _remainingSlaTime.isNegative && !_currentIssue.isResolved;
     final isS5 = severity == SeverityLevel.s5;
 
     return Scaffold(
@@ -442,13 +441,15 @@ class _IssueDetailScreenState extends State<IssueDetailScreen>
                               ),
                             ),
                             Text(
-                              severity.slaHours < 24
-                                  ? '${severity.slaHours} Hours'
-                                  : '${(severity.slaHours / 24).round()} Days',
+                              _remainingSlaTime.isNegative
+                                  ? 'SLA Breached'
+                                  : (_remainingSlaTime.inHours >= 24
+                                      ? '${(_remainingSlaTime.inHours / 24).round()}d left'
+                                      : '${_remainingSlaTime.inHours}h ${_remainingSlaTime.inMinutes % 60}m left'),
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w900,
-                                color: severity.color,
+                                color: _remainingSlaTime.isNegative ? Colors.red : severity.color,
                               ),
                             ),
                           ],
@@ -740,14 +741,14 @@ class _IssueDetailScreenState extends State<IssueDetailScreen>
                               const Icon(Icons.event_available_rounded, size: 16, color: Color(0xFF006699)),
                               const SizedBox(width: 6),
                               Text(
-                                'Scheduled Slot: ${_currentIssue.scheduledHearings.first.date} (${_currentIssue.scheduledHearings.first.timeSlot})',
+                                'Scheduled Slot: ${_currentIssue.scheduledHearings.first.scheduledDate.toLocal().toString().split(" ")[0]} (${_currentIssue.scheduledHearings.first.timeSlot})',
                                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
                               ),
                             ],
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Venue: ${_currentIssue.scheduledHearings.first.venue} • Officer: ${_currentIssue.scheduledHearings.first.engineerName}',
+                            'Mode: ${_currentIssue.scheduledHearings.first.hearingMode} • Officer: ${_currentIssue.scheduledHearings.first.officerName}',
                             style: TextStyle(fontSize: 10, color: isDark ? Colors.grey.shade300 : const Color(0xFF475569)),
                           ),
                         ],
@@ -1237,8 +1238,8 @@ class _IssueDetailScreenState extends State<IssueDetailScreen>
           body: Padding(
             padding: const EdgeInsets.all(24),
             child: Center(
-              child: SizedBox(
-                maxWidth: 900,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 900),
                 child: _buildSplitSliderView(Theme.of(ctx).brightness == Brightness.dark),
               ),
             ),
@@ -1478,7 +1479,7 @@ class _HearingBookingBottomSheetState extends State<_HearingBookingBottomSheet> 
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _selectedOfficer,
+            initialValue: _selectedOfficer,
             decoration: const InputDecoration(labelText: 'Designated Ward Officer', border: OutlineInputBorder()),
             items: [
               'Er. Raghavan, Executive Engineer (BBMP)',
@@ -1489,14 +1490,14 @@ class _HearingBookingBottomSheetState extends State<_HearingBookingBottomSheet> 
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _selectedMode,
+            initialValue: _selectedMode,
             decoration: const InputDecoration(labelText: 'Hearing Mode', border: OutlineInputBorder()),
             items: ['In-Person at Ward Office', 'Video Conference'].map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
             onChanged: (v) => setState(() => _selectedMode = v!),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _selectedSlot,
+            initialValue: _selectedSlot,
             decoration: const InputDecoration(labelText: 'Available Time Slot', border: OutlineInputBorder()),
             items: ['Tomorrow at 11:30 AM', 'Thursday at 02:00 PM', 'Friday at 10:00 AM'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
             onChanged: (v) => setState(() => _selectedSlot = v!),

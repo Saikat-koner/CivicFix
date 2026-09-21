@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:latlong2/latlong.dart';
 
 /// Cache entry for spatial coordinates
 class _GeoCacheEntry {
@@ -243,8 +242,8 @@ class GeoService {
     return raw;
   }
 
-  /// Convert LatLng to formatted string
-  static String formatCoordinates(LatLng pos) {
-    return '${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}';
+  /// Convert lat/lng to formatted string
+  static String formatCoordinates(double lat, double lng) {
+    return '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}';
   }
 }
