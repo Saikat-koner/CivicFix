@@ -1,434 +1,694 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/user_profile.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
+  final CitizenProfile? profile;
+
+  const ProfileScreen({super.key, this.profile});
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  Map<String, dynamic>? _profile;
-  bool _loading = true;
-  int _totalReported = 0;
-  int _totalResolved = 0;
-  int _totalUpvotes = 0;
-  int _totalGroundSurveys = 0;
+  late CitizenProfile _profile;
 
   @override
   void initState() {
     super.initState();
-    _loadProfileData();
-  }
-
-  Future<void> _loadProfileData() async {
-    setState(() => _loading = true);
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) {
-      if (mounted) setState(() => _loading = false);
-      return;
-    }
-
-    try {
-      // 1. Fetch Profile
-      final profileRes = await Supabase.instance.client
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle();
-
-      // 2. Fetch User's Issues Stats
-      final issuesRes = await Supabase.instance.client
-          .from('issues')
-          .select('id, status, upvotes_count, has_ground_survey, ground_survey')
-          .eq('user_id', user.id);
-
-      int resolved = 0;
-      int upvotes = 0;
-      int groundSurveys = 0;
-      final issuesList = issuesRes as List<dynamic>? ?? [];
-      for (var issue in issuesList) {
-        final status = issue['status']?.toString();
-        if (status == 'resolved_by_worker' || status == 'community_verified') {
-          resolved++;
-        }
-        upvotes += (issue['upvotes_count'] as num?)?.toInt() ?? 0;
-        if (issue['has_ground_survey'] == true || issue['ground_survey'] != null) {
-          groundSurveys++;
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _profile = profileRes;
-          _totalReported = issuesList.length;
-          _totalResolved = resolved;
-          _totalUpvotes = upvotes;
-          _totalGroundSurveys = groundSurveys;
-          _loading = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('Error loading profile: $e');
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  String _getCitizenTier(int points) {
-    if (points >= 500) return 'Diamond Guardian 💎';
-    if (points >= 250) return 'Gold Warden 🥇';
-    if (points >= 100) return 'Silver Inspector 🥈';
-    if (points >= 50) return 'Bronze Scout 🥉';
-    return 'Active Citizen 🛡️';
-  }
-
-  Future<void> _showEditProfileDialog() async {
-    final theme = Theme.of(context);
-    final nameCtrl = TextEditingController(text: _profile?['full_name'] ?? '');
-    final phoneCtrl = TextEditingController(text: _profile?['phone_number'] ?? '');
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Edit Citizen Profile'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              textCapitalization: TextCapitalization.words,
-              decoration: InputDecoration(
-                labelText: 'Full Name (पूरा नाम)',
-                prefixIcon: const Icon(Icons.person_outline),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: phoneCtrl,
-              keyboardType: TextInputType.phone,
-              decoration: InputDecoration(
-                labelText: 'Phone Number (फ़ोन नंबर)',
-                prefixIcon: const Icon(Icons.phone_outlined),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: theme.colorScheme.primary,
-              foregroundColor: theme.colorScheme.onPrimary,
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Save Changes'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      final user = Supabase.instance.client.auth.currentUser;
-      if (user == null) return;
-
-      try {
-        await Supabase.instance.client.from('profiles').update({
-          'full_name': nameCtrl.text.trim(),
-          'phone_number': phoneCtrl.text.trim(),
-          'updated_at': DateTime.now().toIso8601String(),
-        }).eq('id', user.id);
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(backgroundColor: Colors.green, content: Text('Profile updated successfully!')),
-          );
-        }
-        _loadProfileData();
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(backgroundColor: Colors.red, content: Text('Failed to update: $e')),
-          );
-        }
-      }
-    }
+    _profile = widget.profile ??
+        const CitizenProfile(
+          id: 'CFX-USER-9402',
+          name: 'Priya Sharma',
+          email: 'priya.sharma@resident.civicfix.in',
+          phone: '+91 98450 12345',
+          wardName: 'Ward 112 (Domlur & Indiranagar)',
+          totalXp: 3450, // Gold Warden Tier
+          reportsSubmitted: 32,
+          reportsResolved: 28,
+          civicCredits: 520,
+          communityUpvotes: 184,
+          wardRank: 4,
+          verificationAccuracy: 98.5,
+          joinedDate: null as dynamic,
+        );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final user = Supabase.instance.client.auth.currentUser;
-    final email = user?.email ?? 'No email';
-    final name = _profile?['full_name'] ?? 'Citizen';
-    final points = (_profile?['reputation_points'] as num?)?.toInt() ?? 10;
-    final role = _profile?['role']?.toString().toUpperCase() ?? 'CITIZEN';
-    final tier = _getCitizenTier(points);
+    final tier = _profile.tier;
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text('Citizen Profile (नागरिक प्रोफ़ाइल)', style: TextStyle(fontWeight: FontWeight.bold)),
-        elevation: 1,
+        backgroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: false,
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0050C8).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                Icons.account_circle_rounded,
+                color: Color(0xFF0050C8),
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Citizen Profile & Impact',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: const Color(0xFF0F172A),
+              ),
+            ),
+          ],
+        ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.edit_outlined),
-            tooltip: 'Edit Profile',
-            onPressed: _showEditProfileDialog,
+          Container(
+            margin: const EdgeInsets.only(right: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF10B981).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: const Color(0xFF10B981).withValues(alpha: 0.3),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.verified_rounded, size: 14, color: Color(0xFF059669)),
+                const SizedBox(width: 4),
+                Text(
+                  'Verified Resident',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF059669),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadProfileData,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    // Profile Header Card
-                    Card(
-                      elevation: 2,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
-                          children: [
-                            CircleAvatar(
-                              radius: 40,
-                              backgroundColor: theme.colorScheme.primary,
-                              foregroundColor: theme.colorScheme.onPrimary,
-                              child: Text(
-                                name.isNotEmpty ? name[0].toUpperCase() : 'C',
-                                style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 4),
-                            Text(email, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 13)),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              children: [
-                                Chip(
-                                  avatar: const Icon(Icons.shield, size: 16, color: Colors.blue),
-                                  label: Text(tier, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                                  backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
-                                ),
-                                Chip(
-                                  avatar: const Icon(Icons.badge, size: 16),
-                                  label: Text(role, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Citizen Impact Statistics Grid
-                    Row(
-                      children: [
-                        _statCard('Total Reported', '$_totalReported', Icons.campaign, Colors.blue),
-                        const SizedBox(width: 8),
-                        _statCard('Resolved', '$_totalResolved', Icons.task_alt, Colors.green),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        _statCard('⚡ Rapid Audits', '$_totalGroundSurveys', Icons.bolt, Colors.amber.shade900),
-                        const SizedBox(width: 8),
-                        _statCard('Citizen XP', '$points', Icons.star, Colors.amber.shade800),
-                        const SizedBox(width: 8),
-                        _statCard('Upvotes', '$_totalUpvotes', Icons.thumb_up, Colors.deepPurple),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Badges & Achievements Section
-                    Card(
-                      elevation: 1,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Row(
-                              children: [
-                                Icon(Icons.military_tech, color: Colors.amber, size: 24),
-                                SizedBox(width: 8),
-                                Text('Civic Badges & Badging', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            _badgeRow(
-                              'Rapid Triage Surveyor ⚡',
-                              'Conducted rapid on-site hazard survey within 2 hours (+50 XP)',
-                              _totalGroundSurveys >= 1 || points >= 60,
-                              Icons.bolt,
-                              Colors.amber.shade900,
-                            ),
-                            const Divider(height: 16),
-                            _badgeRow(
-                              'Ground Truth Auditor 🛡️',
-                              'Conducted 3+ on-site ground hazard audits with live modifiers',
-                              _totalGroundSurveys >= 3,
-                              Icons.verified_user,
-                              Colors.teal,
-                            ),
-                            const Divider(height: 16),
-                            _badgeRow(
-                              'First Responder',
-                              'Reported your first civic hazard',
-                              _totalReported >= 1,
-                              Icons.flag,
-                              Colors.orange,
-                            ),
-                            const Divider(height: 16),
-                            _badgeRow(
-                              'Eagle Eye Citizen',
-                              'Reported 5 or more civic issues',
-                              _totalReported >= 5,
-                              Icons.visibility,
-                              Colors.blue,
-                            ),
-                            const Divider(height: 16),
-                            _badgeRow(
-                              'Community Champion',
-                              'Earned 100+ reputation points',
-                              points >= 100,
-                              Icons.emoji_events,
-                              Colors.amber,
-                            ),
-                            const Divider(height: 16),
-                            _badgeRow(
-                              'Resolution Hero',
-                              '3+ of your reported issues resolved',
-                              _totalResolved >= 3,
-                              Icons.verified,
-                              Colors.green,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Sign Out Button
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.red,
-                        side: const BorderSide(color: Colors.red),
-                        minimumSize: const Size.fromHeight(48),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      icon: const Icon(Icons.logout),
-                      label: const Text('Sign Out (लॉग आउट)', style: TextStyle(fontWeight: FontWeight.bold)),
-                      onPressed: () async {
-                        final confirm = await showDialog<bool>(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            title: const Text('Sign Out'),
-                            content: const Text('Are you sure you want to sign out of CivicFix?'),
-                            actions: [
-                              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                              ElevatedButton(
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-                                onPressed: () => Navigator.pop(ctx, true),
-                                child: const Text('Sign Out'),
-                              ),
-                            ],
-                          ),
-                        );
-                        if (confirm == true) {
-                          if (context.mounted) {
-                            Navigator.of(context).pop();
-                          }
-                          await Supabase.instance.client.auth.signOut();
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-                ),
-              ),
-            ),
-    );
-  }
-
-  Widget _statCard(String title, String count, IconData icon, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: color.withValues(alpha: 0.25)),
-        ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(icon, color: color, size: 26),
-            const SizedBox(height: 8),
-            Text(count, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: color)),
-            const SizedBox(height: 2),
-            Text(
-              title,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurfaceVariant),
-            ),
+            // 1. Citizen Identity & Current Tier Header
+            _buildCitizenHeaderCard(context, tier),
+
+            const SizedBox(height: 16),
+
+            // 2. Citizen XP & Progression Bar
+            _buildXpProgressionCard(context, tier),
+
+            const SizedBox(height: 16),
+
+            // 3. Impact Counters Bento Grid
+            _buildImpactCountersGrid(context),
+
+            const SizedBox(height: 16),
+
+            // 4. Official Tier Badges (Diamond Guardian, Gold Warden, Silver Inspector, Bronze Scout)
+            _buildTierBadgesSection(context, tier),
+
+            const SizedBox(height: 16),
+
+            // 5. Civic Credits Store Preview
+            _buildPerksRedemptionCard(context),
+
+            const SizedBox(height: 24),
           ],
         ),
       ),
     );
   }
 
-  Widget _badgeRow(String title, String subtitle, bool unlocked, IconData icon, Color color) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: unlocked ? color.withValues(alpha: 0.15) : Colors.grey.withValues(alpha: 0.1),
-            shape: BoxShape.circle,
+  Widget _buildCitizenHeaderCard(BuildContext context, CitizenTier currentTier) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
-          child: Icon(icon, color: unlocked ? color : Colors.grey, size: 24),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        ],
+      ),
+      child: Row(
+        children: [
+          Stack(
             children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  color: unlocked ? null : Colors.grey,
+              CircleAvatar(
+                radius: 34,
+                backgroundColor: currentTier.badgeColor.withValues(alpha: 0.15),
+                child: Icon(
+                  currentTier.icon,
+                  size: 34,
+                  color: currentTier.badgeColor,
                 ),
               ),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF0050C8),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.shield_rounded, size: 12, color: Colors.white),
                 ),
               ),
             ],
           ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        _profile.name,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: currentTier.badgeColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: currentTier.badgeColor.withValues(alpha: 0.4),
+                        ),
+                      ),
+                      child: Text(
+                        currentTier.title,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: currentTier.badgeColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    const Icon(Icons.location_on_outlined, size: 14, color: Color(0xFF64748B)),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        _profile.wardName,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF64748B),
+                          fontWeight: FontWeight.w500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Resident ID: ${_profile.id}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: Color(0xFF94A3B8),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildXpProgressionCard(BuildContext context, CitizenTier tier) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            const Color(0xFF0050C8),
+            const Color(0xFF1D4ED8),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        Icon(
-          unlocked ? Icons.check_circle : Icons.lock_outline,
-          color: unlocked ? Colors.green : Colors.grey,
-          size: 20,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0050C8).withValues(alpha: 0.25),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.between,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.bolt_rounded, color: Colors.amberAccent, size: 18),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Citizen XP Level',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${_profile.totalXp} Total XP',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: _profile.progressToNextTier,
+              backgroundColor: Colors.white.withValues(alpha: 0.2),
+              valueColor: const AlwaysStoppedAnimation<Color>(Colors.amberAccent),
+              minHeight: 10,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.between,
+            children: [
+              Text(
+                'Current: ${tier.title}',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.85),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                tier == CitizenTier.diamondGuardian
+                    ? 'Maximum Civic Tier Reached'
+                    : '${_profile.xpNeededForNextTier} XP to Next Tier',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.85),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildImpactCountersGrid(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Civic Impact & Statistics',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF0F172A),
+          ),
+        ),
+        const SizedBox(height: 10),
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
+          childAspectRatio: 0.95,
+          children: [
+            _buildCounterTile(
+              label: 'Reports Filed',
+              value: '${_profile.reportsSubmitted}',
+              icon: Icons.campaign_rounded,
+              color: const Color(0xFF0284C7),
+            ),
+            _buildCounterTile(
+              label: 'Issues Fixed',
+              value: '${_profile.reportsResolved}',
+              icon: Icons.task_alt_rounded,
+              color: const Color(0xFF059669),
+            ),
+            _buildCounterTile(
+              label: 'Civic Credits',
+              value: '${_profile.civicCredits} CC',
+              icon: Icons.monetization_on_rounded,
+              color: const Color(0xFFD97706),
+            ),
+            _buildCounterTile(
+              label: 'Upvotes',
+              value: '+${_profile.communityUpvotes}',
+              icon: Icons.thumb_up_alt_rounded,
+              color: const Color(0xFF6366F1),
+            ),
+            _buildCounterTile(
+              label: 'Ward Rank',
+              value: '#${_profile.wardRank}',
+              icon: Icons.leaderboard_rounded,
+              color: const Color(0xFF7C3AED),
+            ),
+            _buildCounterTile(
+              label: 'Accuracy',
+              value: '${_profile.verificationAccuracy}%',
+              icon: Icons.verified_outlined,
+              color: const Color(0xFFE11D48),
+            ),
+          ],
         ),
       ],
+    );
+  }
+
+  Widget _buildCounterTile({
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 18, color: color),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              color: Color(0xFF0F172A),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF64748B),
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTierBadgesSection(BuildContext context, CitizenTier currentTier) {
+    const allTiers = [
+      CitizenTier.diamondGuardian,
+      CitizenTier.goldWarden,
+      CitizenTier.silverInspector,
+      CitizenTier.bronzeScout,
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.between,
+          children: [
+            const Text(
+              'Civic Tier Badges',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF0F172A),
+              ),
+            ),
+            Text(
+              'Earn XP by reporting & confirming',
+              style: TextStyle(
+                fontSize: 11,
+                color: const Color(0xFF64748B).withValues(alpha: 0.8),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: allTiers.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final t = allTiers[index];
+            final isUnlocked = _profile.totalXp >= t.minXp;
+            final isCurrent = currentTier == t;
+
+            return Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isCurrent
+                      ? t.badgeColor
+                      : isUnlocked
+                          ? const Color(0xFFCBD5E1)
+                          : const Color(0xFFE2E8F0),
+                  width: isCurrent ? 2 : 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: isUnlocked
+                          ? t.badgeColor.withValues(alpha: 0.12)
+                          : const Color(0xFFF1F5F9),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      t.icon,
+                      color: isUnlocked ? t.badgeColor : const Color(0xFF94A3B8),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              t.title,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: isUnlocked ? const Color(0xFF0F172A) : const Color(0xFF94A3B8),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '(${t.hindiTitle})',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isUnlocked ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                              ),
+                            ),
+                            if (isCurrent) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: t.badgeColor.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'ACTIVE',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w900,
+                                    color: t.badgeColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          t.privilege,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isUnlocked ? const Color(0xFF475569) : const Color(0xFF94A3B8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '${t.minXp}+ XP',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: isUnlocked ? t.badgeColor : const Color(0xFF94A3B8),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Icon(
+                        isUnlocked ? Icons.lock_open_rounded : Icons.lock_rounded,
+                        size: 14,
+                        color: isUnlocked ? const Color(0xFF10B981) : const Color(0xFFCBD5E1),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPerksRedemptionCard(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF3C7).withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFDE68A)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFD97706).withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.confirmation_number_rounded, color: Color(0xFFD97706), size: 24),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Community Perks Store',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF92400E),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Redeem your ${_profile.civicCredits} CC for free 1-Day Municipal Parking & Metro Passes.',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFFB45309),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Opening Civic Perks Redemption Store...'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFD97706),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Redeem', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
     );
   }
 }

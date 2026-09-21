@@ -1,0 +1,49 @@
+{
+  "name": "CivicFix - Civic Issue Reporting & Navigation",
+  "short_name": "CivicFix",
+  "description": "Civic issue reporting and tracking platform with open-source maps, AI image analysis, real-time GPS navigation, and community impact leaderboards.",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f8f9ff",
+  "theme_color": "#0050c8",
+  "categories": ["government", "utilities", "navigation", "productivity"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Report Issue",
+      "short_name": "Report",
+      "description": "Snap a photo and report an infrastructure defect",
+      "url": "/?tab=report",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Higher-Ups Directory",
+      "short_name": "Directory",
+      "description": "Contact Zonal Commissioners and Ward Officers",
+      "url": "/?tab=higher_ups",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+    },
+    {
+      "name": "Emergency Hotlines",
+      "short_name": "SOS",
+      "description": "Immediate 911 / 1533 / Hazmat contact",
+      "url": "/?sos=true",
+      "icons": [{ "src": "/icon.svg", "sizes": "192x192" }]
+    }
+  ]
+}

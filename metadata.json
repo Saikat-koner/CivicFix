@@ -1,0 +1,12 @@
+{
+  "name": "CivicFix",
+  "description": "Civic issue reporting and tracking platform with open-source maps, AI image analysis, real-time GPS navigation, and community impact leaderboards.",
+  "requestFramePermissions": [
+    "geolocation",
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

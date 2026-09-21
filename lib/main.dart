@@ -1,19 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'screens/auth_screen.dart';
 import 'screens/home_screen.dart';
 
-const String supabaseUrl = 'https://hcncblrdgrenigmicmsy.supabase.co';
-const String supabaseAnonKey = 'sb_publishable_VbBIopgPaQqz1hqT5EBr3Q_cCT6ot5u';
-
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  await Supabase.initialize(
-    url: supabaseUrl,
-    publishableKey: supabaseAnonKey,
-  );
-
+void main() {
   runApp(const CivicFixApp());
 }
 
@@ -22,53 +10,38 @@ class CivicFixApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const seedColor = Color(0xFF006699);
+
     return MaterialApp(
-      title: 'CivicFix',
+      title: 'CivicFix GovPortal',
       debugShowCheckedModeBanner: false,
       themeMode: ThemeMode.system,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0056B3),
+          seedColor: seedColor,
           brightness: Brightness.light,
+          surface: const Color(0xFFF8FAFC),
         ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.grey.shade50,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
-          ),
-        ),
-        cardTheme: CardThemeData(
-          elevation: 1,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        scaffoldBackgroundColor: const Color(0xFFF8FAFC),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          scrolledUnderElevation: 1,
         ),
       ),
       darkTheme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0056B3),
+          seedColor: seedColor,
           brightness: Brightness.dark,
+          surface: const Color(0xFF0F172A),
         ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
-          ),
-        ),
-        cardTheme: CardThemeData(
-          elevation: 1,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        scaffoldBackgroundColor: const Color(0xFF0F172A),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF1E293B),
+          elevation: 0,
+          scrolledUnderElevation: 1,
         ),
       ),
       home: const AuthGate(),
@@ -76,36 +49,15 @@ class CivicFixApp extends StatelessWidget {
   }
 }
 
+/// Statutory AuthGate: Defaults to Public Guest Exploration Mode without locking users out.
 class AuthGate extends StatelessWidget {
-  const AuthGate({super.key});
+  final Object? session;
+
+  const AuthGate({super.key, this.session});
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<AuthState>(
-      stream: Supabase.instance.client.auth.onAuthStateChange,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Scaffold(
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.location_city, size: 72, color: Theme.of(context).colorScheme.primary),
-                  const SizedBox(height: 16),
-                  const Text('CivicFix', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  const CircularProgressIndicator(),
-                ],
-              ),
-            ),
-          );
-        }
-        final session = snapshot.data?.session;
-        if (session != null) {
-          return const HomeScreen();
-        }
-        return const AuthScreen();
-      },
-    );
+    // If session == null, directly render HomeScreen in Public Guest Mode
+    return HomeScreen(isGuest: session == null);
   }
 }

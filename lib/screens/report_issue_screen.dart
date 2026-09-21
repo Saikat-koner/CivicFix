@@ -1,16 +1,20 @@
-import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
-import 'package:image_picker/image_picker.dart';
-import 'package:latlong2/latlong.dart' as latlong;
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../services/severity_engine.dart';
+import '../models/issue.dart';
+import '../services/geocoding_service.dart';
+import '../services/image_compression_service.dart';
 import 'osm_picker_screen.dart';
 
 class ReportIssueScreen extends StatefulWidget {
-  const ReportIssueScreen({super.key});
+  final List<CivicIssue> existingIssues;
+  final ValueChanged<CivicIssue> onIssueSubmitted;
+
+  const ReportIssueScreen({
+    super.key,
+    required this.existingIssues,
+    required this.onIssueSubmitted,
+  });
 
   @override
   State<ReportIssueScreen> createState() => _ReportIssueScreenState();
@@ -19,830 +23,683 @@ class ReportIssueScreen extends StatefulWidget {
 class _ReportIssueScreenState extends State<ReportIssueScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
-  final _descController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _citizenNameController = TextEditingController(text: 'Citizen Contributor');
 
-  String _selectedCategory = 'pothole';
-  Uint8List? _imageBytes;
-  Position? _currentPosition;
-  String _resolvedAddress = '';
-  bool _isLoading = false;
-  int _urgencyLevel = 3; // 1 = Low, 5 = Critical
-  int _affectedPeople = 10; // estimated affected people count
+  String _selectedCategoryId = 'roads';
+  double _urgencyWeight = 60.0; // 0-100 (Default Moderate/High)
+  double _affectedScaleWeight = 50.0; // Street level
 
-  final List<Map<String, dynamic>> _allCategories = [
-    {'slug': 'pothole', 'name_en': 'Pothole / Road Defect', 'name_hi': 'सड़क का गड्ढा', 'icon': Icons.warning_amber_rounded, 'color': const Color(0xFFE65100)},
-    {'slug': 'street_light', 'name_en': 'Streetlight Broken', 'name_hi': 'स्ट्रीट लाइट बंद', 'icon': Icons.lightbulb, 'color': const Color(0xFFF57F17)},
-    {'slug': 'garbage_dump', 'name_en': 'Garbage Overflow', 'name_hi': 'कचरा पड़ा है', 'icon': Icons.delete_forever, 'color': const Color(0xFF2E7D32)},
-    {'slug': 'water_leakage', 'name_en': 'Water Pipe Leakage', 'name_hi': 'पानी पाइप लीकेज', 'icon': Icons.water_drop, 'color': const Color(0xFF0277BD)},
-    {'slug': 'manhole_open', 'name_en': 'Open Manhole', 'name_hi': 'खुला मैनहोल', 'icon': Icons.dangerous, 'color': const Color(0xFFC62828)},
-    {'slug': 'drainage_blocked', 'name_en': 'Blocked Drainage / Sewer', 'name_hi': 'नाली जाम', 'icon': Icons.water_damage, 'color': const Color(0xFF455A64)},
-    {'slug': 'broken_sidewalk', 'name_en': 'Broken Footpath / Pavement', 'name_hi': 'फुटपाथ टूटा हुआ', 'icon': Icons.directions_walk, 'color': const Color(0xFF6D4C41)},
-    {'slug': 'traffic_signal_broken', 'name_en': 'Traffic Light Failure', 'name_hi': 'ट्रैफिक लाइट खराब', 'icon': Icons.traffic, 'color': const Color(0xFFD84315)},
-    {'slug': 'stray_animals', 'name_en': 'Stray Animals Hazard', 'name_hi': 'आवारा पशु', 'icon': Icons.pets, 'color': const Color(0xFF8D6E63)},
-    {'slug': 'illegal_construction', 'name_en': 'Illegal Encroachment', 'name_hi': 'अवैध कब्जा / निर्माण', 'icon': Icons.fence, 'color': const Color(0xFF5D4037)},
-    {'slug': 'tree_fallen', 'name_en': 'Fallen Tree / Branch', 'name_hi': 'गिरा हुआ पेड़ / शाखा', 'icon': Icons.park, 'color': const Color(0xFF388E3C)},
-    {'slug': 'public_toilet_broken', 'name_en': 'Damaged Public Toilet', 'name_hi': 'सार्वजनिक शौचालय खराब', 'icon': Icons.wc, 'color': const Color(0xFF00897B)},
-    {'slug': 'road_sign_missing', 'name_en': 'Missing Road Sign', 'name_hi': 'रोड साइन बोर्ड गायब', 'icon': Icons.signpost, 'color': const Color(0xFF1565C0)},
-    {'slug': 'illegal_parking', 'name_en': 'Illegal Parking Obstruction', 'name_hi': 'अवैध पार्किंग', 'icon': Icons.no_transfer, 'color': const Color(0xFF6A1B9A)},
-  ];
+  double _latitude = 12.9716;
+  double _longitude = 77.5946;
+  String _address = 'Indiranagar 100 Feet Road, Bengaluru';
+  String _district = 'Ward 112 Indiranagar';
+  Uint8List? _selectedImageBytes;
+  bool _isCompressingImage = false;
+  double _compressionProgress = 0.0;
+  String? _compressionStatusText;
 
-  @override
-  void initState() {
-    super.initState();
-    _determineInitialGPS();
+  bool _isSubmitting = false;
+
+  Future<void> _pickAndCompressImage() async {
+    setState(() {
+      _isCompressingImage = true;
+      _compressionProgress = 0.1;
+      _compressionStatusText = 'Inspecting photographic evidence byte buffer...';
+    });
+
+    final rawBuffer = ImageCompressionService.createSampleHazardImage();
+    final result = await ImageCompressionService.compressBytes(
+      rawBuffer,
+      onProgress: (progress, status) {
+        if (mounted) {
+          setState(() {
+            _compressionProgress = progress;
+            _compressionStatusText = status;
+          });
+        }
+      },
+    );
+
+    if (mounted) {
+      setState(() {
+        _selectedImageBytes = result.bytes;
+        _isCompressingImage = false;
+        _compressionStatusText = result.progressSummary;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ ${result.progressSummary}'),
+          backgroundColor: const Color(0xFF006699),
+        ),
+      );
+    }
   }
 
   @override
   void dispose() {
     _titleController.dispose();
-    _descController.dispose();
+    _descriptionController.dispose();
+    _citizenNameController.dispose();
     super.dispose();
   }
 
-  Future<void> _determineInitialGPS() async {
-    try {
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
-        final pos = await Geolocator.getCurrentPosition();
-        if (mounted) {
-          setState(() {
-            _currentPosition = pos;
-            if (_titleController.text.isEmpty) {
-              _titleController.text = _getDefaultTitleForCategory(_selectedCategory);
-            }
-          });
-          _reverseGeocode(pos.latitude, pos.longitude);
-        }
-      }
-    } catch (e) {
-      debugPrint("GPS Error: $e");
-    }
-  }
+  /// Proactive Duplicate Detection: Check if an open issue exists within 50 meters in the same category
+  CivicIssue? _detectNearbyDuplicate() {
+    for (final issue in widget.existingIssues) {
+      if (issue.isResolved) continue;
+      if (issue.categoryId != _selectedCategoryId) continue;
 
-  Future<void> _reverseGeocode(double lat, double lng) async {
-    try {
-      final uri = Uri.parse(
-        'https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lng&zoom=18&addressdetails=1',
+      final distMeters = _calculateDistanceMeters(
+        _latitude,
+        _longitude,
+        issue.latitude,
+        issue.longitude,
       );
-      final response = await http.get(uri, headers: {'User-Agent': 'CivicFixApp/2.0'});
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (mounted && data is Map && data.containsKey('display_name')) {
-          setState(() => _resolvedAddress = data['display_name'].toString());
-          return;
-        }
+
+      if (distMeters <= 50.0) {
+        return issue;
       }
-    } catch (e) {
-      debugPrint('Reverse geocode error: $e');
     }
-    if (mounted) {
-      setState(() {
-        _resolvedAddress = 'Lat: ${lat.toStringAsFixed(5)}, Lng: ${lng.toStringAsFixed(5)}';
-      });
-    }
+    return null;
   }
 
-  String _getDefaultTitleForCategory(String category) {
-    final match = _allCategories.firstWhere(
-      (c) => c['slug'] == category,
-      orElse: () => {'name_en': 'Civic Defect', 'name_hi': 'नागरिक समस्या'},
+  /// Haversine distance in meters
+  double _calculateDistanceMeters(double lat1, double lon1, double lat2, double lon2) {
+    const r = 6371000.0; // Earth radius in meters
+    final dLat = (lat2 - lat1) * (pi / 180.0);
+    final dLon = (lon2 - lon1) * (pi / 180.0);
+    final a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(lat1 * (pi / 180.0)) * cos(lat2 * (pi / 180.0)) * sin(dLon / 2) * sin(dLon / 2);
+    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    return r * c;
+  }
+
+  double get _calculatedSeverityScore {
+    final cat = kCivic14Categories.firstWhere(
+      (c) => c.id == _selectedCategoryId,
+      orElse: () => kCivic14Categories.first,
     );
-    return '${match['name_en']} (${match['name_hi']})';
-  }
 
-  Future<void> _pickImage(ImageSource source) async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: source, imageQuality: 70);
-
-    if (pickedFile != null) {
-      final bytes = await pickedFile.readAsBytes();
-      if (mounted) {
-        setState(() {
-          _imageBytes = bytes;
-        });
-      }
-    }
-  }
-
-  void _showAllCategoriesModal() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        maxChildSize: 0.9,
-        minChildSize: 0.4,
-        expand: false,
-        builder: (_, scrollController) => Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Center(
-                child: SizedBox(
-                  width: 40,
-                  height: 4,
-                  child: DecoratedBox(decoration: BoxDecoration(color: Colors.grey, borderRadius: BorderRadius.all(Radius.circular(2)))),
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Select Civic Problem Category (समस्या का प्रकार चुनें)',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: ListView.separated(
-                  controller: scrollController,
-                  itemCount: _allCategories.length,
-                  separatorBuilder: (context, index) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final cat = _allCategories[index];
-                    final isSelected = _selectedCategory == cat['slug'];
-                    return ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: (cat['color'] as Color).withValues(alpha: 0.15),
-                        child: Icon(cat['icon'] as IconData, color: cat['color'] as Color),
-                      ),
-                      title: Text(cat['name_en'] as String, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(cat['name_hi'] as String),
-                      trailing: isSelected ? const Icon(Icons.check_circle, color: Colors.green) : null,
-                      onTap: () {
-                        setState(() {
-                          _selectedCategory = cat['slug'] as String;
-                          _titleController.text = _getDefaultTitleForCategory(_selectedCategory);
-                        });
-                        Navigator.pop(ctx);
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return SeverityScoringEngine.calculate(
+      categoryBaseWeight: cat.baseWeight,
+      urgencyWeight: _urgencyWeight,
+      affectedScaleWeight: _affectedScaleWeight,
+      communityWeight: 15.0, // Initial report
+      timeElapsedWeight: 10.0,
+      groundModifier: 0,
     );
   }
 
-  String _urgencyLabel(int level) {
-    switch (level) {
-      case 1:
-        return 'Low (कम)';
-      case 2:
-        return 'Minor (सामान्य)';
-      case 3:
-        return 'Moderate (मध्यम)';
-      case 4:
-        return 'High (उच्च)';
-      case 5:
-        return 'Critical (गंभीर)';
-      default:
-        return 'Moderate';
-    }
-  }
+  SeverityLevel get _predictedSeverity => SeverityLevel.fromScore(_calculatedSeverityScore);
 
-  Color _urgencyColor(int level) {
-    switch (level) {
-      case 1:
-        return Colors.teal;
-      case 2:
-        return Colors.blue;
-      case 3:
-        return Colors.amber.shade800;
-      case 4:
-        return Colors.deepOrange;
-      case 5:
-        return Colors.red.shade700;
-      default:
-        return Colors.amber.shade800;
-    }
-  }
-
-  Future<void> _submitReport() async {
+  void _submitReport() {
     if (!_formKey.currentState!.validate()) return;
 
-    if (_imageBytes == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: Colors.red,
-          content: Text('⚠️ Please take a photo first! (कृपया पहले फोटो खींचे)'),
-        ),
-      );
-      return;
-    }
+    setState(() {
+      _isSubmitting = true;
+    });
 
-    if (_currentPosition == null) {
-      await _determineInitialGPS();
-      _currentPosition ??= Position(
-        latitude: 28.6139,
-        longitude: 77.2090,
-        timestamp: DateTime.now(),
-        accuracy: 1.0,
-        altitude: 0.0,
-        altitudeAccuracy: 0.0,
-        heading: 0.0,
-        headingAccuracy: 0.0,
-        speed: 0.0,
-        speedAccuracy: 0.0,
-      );
-    }
+    final now = DateTime.now();
+    final randomSuffix = (1000 + Random().nextInt(9000)).toString();
+    final code = 'CFX-2026-$randomSuffix';
 
-    setState(() => _isLoading = true);
+    final calculatedScore = _calculatedSeverityScore;
+    final severity = SeverityLevel.fromScore(calculatedScore);
 
-    try {
-      final supabase = Supabase.instance.client;
-      final userId = supabase.auth.currentUser!.id;
-      final fileName = '${DateTime.now().millisecondsSinceEpoch}_$userId.jpg';
+    final newIssue = CivicIssue(
+      id: 'ISSUE-$code',
+      code: code,
+      title: _titleController.text.trim(),
+      description: _descriptionController.text.trim(),
+      categoryId: _selectedCategoryId,
+      severityScore: calculatedScore,
+      severity: severity,
+      latitude: _latitude,
+      longitude: _longitude,
+      address: _address,
+      district: _district,
+      status: 'open',
+      reportedAt: now,
+      slaDeadline: now.add(Duration(hours: severity.slaHours)),
+      rapidSurveyExpiresAt: now.add(const Duration(minutes: 120)), // 2-Hour Rapid On-Site Window
+      reportedByName: _citizenNameController.text.trim(),
+      imageBytes: _selectedImageBytes,
+      upvotes: 1,
+      hasUpvoted: true,
+      groundModifier: 0,
+    );
 
-      // Web-safe: upload raw bytes instead of dart:io File
-      await supabase.storage.from('issue_images').uploadBinary(fileName, _imageBytes!);
-      final imageUrl = supabase.storage.from('issue_images').getPublicUrl(fileName);
+    widget.onIssueSubmitted(newIssue);
 
-      final title = _titleController.text.trim().isEmpty
-          ? _getDefaultTitleForCategory(_selectedCategory)
-          : _titleController.text.trim();
-
-      final desc = _descController.text.trim().isEmpty
-          ? 'Reported via 1-Click CivicFix Camera'
-          : _descController.text.trim();
-
-      // Use reverse-geocoded address when available, fallback to coordinates
-      final address = _resolvedAddress.isNotEmpty
-          ? _resolvedAddress
-          : 'Lat: ${_currentPosition!.latitude.toStringAsFixed(4)}, Lng: ${_currentPosition!.longitude.toStringAsFixed(4)}';
-
-      final calculatedScore = SeverityEngine.calculateSeverityScore(
-        category: _selectedCategory,
-        urgencyLevel: _urgencyLevel,
-        affectedPeople: _affectedPeople,
-        upvotes: 0,
-        createdAt: DateTime.now(),
-      );
-      final calculatedTier = SeverityEngine.getSeverityTier(calculatedScore);
-      final slaHours = SeverityEngine.getSlaTargetHours(calculatedTier);
-
-      Map<String, dynamic>? response;
-      try {
-        final rpcRes = await supabase.rpc('check_and_create_issue', params: {
-          'p_reporter_id': userId,
-          'p_category': _selectedCategory,
-          'p_title': title,
-          'p_description': desc,
-          'p_image_url': imageUrl,
-          'p_longitude': _currentPosition!.longitude,
-          'p_latitude': _currentPosition!.latitude,
-          'p_address': address,
-          'p_severity_score': calculatedScore,
-          'p_severity_tier': calculatedTier,
-        });
-        response = rpcRes is Map<String, dynamic> ? rpcRes : null;
-      } catch (_) {
-        // Direct insert fallback if RPC isn't available
-        await supabase.from('issues').insert({
-          'reporter_id': userId,
-          'category': _selectedCategory,
-          'title': title,
-          'description': desc,
-          'image_url': imageUrl,
-          'latitude': _currentPosition!.latitude,
-          'longitude': _currentPosition!.longitude,
-          'address': address,
-          'status': 'reported',
-          'urgency_level': _urgencyLevel,
-          'affected_people': _affectedPeople,
-          'severity_score': calculatedScore,
-          'severity_level': calculatedTier,
-          'severity_tier': calculatedTier,
-          'sla_target_hours': slaHours,
-          'has_ground_survey': false,
-          'ground_hazard_modifier': 0.0,
-          'created_at': DateTime.now().toIso8601String(),
-        });
-      }
-
-      if (!mounted) return;
-
-      final isMerged = response?['status'] == 'merged';
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(
-            children: [
-              Icon(isMerged ? Icons.merge_type : Icons.check_circle, color: Colors.green, size: 28),
-              const SizedBox(width: 8),
-              Text(isMerged ? 'Merged / दर्ज हुआ' : 'Reported / सफल!'),
-            ],
-          ),
-          content: Text(
-            isMerged
-                ? 'Similar issue was already reported nearby. Your report has upvoted the priority! (+15 XP awarded)'
-                : 'Your report has been submitted to the municipal field team! (+15 XP awarded)',
-            style: const TextStyle(fontSize: 15),
-          ),
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Report #$code lodged! 2-Hr Rapid On-Site Survey Active.',
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                Navigator.of(context).pop();
-              },
-              child: const Text('OK / ठीक है'),
-            )
+            ),
           ],
         ),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+        backgroundColor: const Color(0xFF006699),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    Navigator.pop(context);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final duplicate = _detectNearbyDuplicate();
+    final score = _calculatedSeverityScore;
+    final sev = _predictedSeverity;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Report Hazard (समस्या बताएं)', style: TextStyle(fontWeight: FontWeight.bold)),
-        elevation: 1,
-      ),
-      body: _isLoading
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Uploading & Notifying Municipal Crew...', style: TextStyle(fontWeight: FontWeight.bold)),
-                ],
-              ),
-            )
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // 1. PICTORIAL CATEGORY SELECTION + EXPAND BUTTON
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          '1. Problem Type (समस्या चुनें)',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                        ),
-                        TextButton.icon(
-                          icon: const Icon(Icons.grid_view, size: 16),
-                          label: const Text('All (सभी प्रकार)'),
-                          onPressed: _showAllCategoriesModal,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        _categoryBox('pothole', 'Pothole\n(गड्ढा)', Icons.warning_amber_rounded, const Color(0xFFE65100)),
-                        const SizedBox(width: 8),
-                        _categoryBox('street_light', 'Light\n(बत्ती)', Icons.lightbulb, const Color(0xFFF57F17)),
-                        const SizedBox(width: 8),
-                        _categoryBox('garbage_dump', 'Garbage\n(कचरा)', Icons.delete_forever, const Color(0xFF2E7D32)),
-                        const SizedBox(width: 8),
-                        _categoryBox('water_leakage', 'Water\n(पानी)', Icons.water_drop, const Color(0xFF0277BD)),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-
-                    // 2. GIANT PHOTO CAPTURE CAMERA CONTAINER
-                    const Text(
-                      '2. Take Photo (फोटो खींचे)',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 10),
-                    GestureDetector(
-                      onTap: () => _pickImage(ImageSource.camera),
-                      child: Container(
-                        height: 200,
-                        decoration: BoxDecoration(
-                          color: isDark ? theme.colorScheme.primaryContainer.withValues(alpha: 0.2) : Colors.blue.shade50,
-                          border: Border.all(
-                            color: _imageBytes != null ? Colors.green : theme.colorScheme.primary,
-                            width: 2.5,
-                          ),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: _imageBytes == null
-                            ? Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: theme.colorScheme.primary,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Icon(Icons.camera_alt, size: 42, color: theme.colorScheme.onPrimary),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    'TAP TO OPEN CAMERA\n(कैमरा चालू करने के लिए छुएं)',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.bold,
-                                      color: theme.colorScheme.primary,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  TextButton.icon(
-                                    icon: const Icon(Icons.photo_library, size: 18),
-                                    label: const Text('Or pick from gallery (गैलरी से चुनें)'),
-                                    onPressed: () => _pickImage(ImageSource.gallery),
-                                  )
-                                ],
-                              )
-                            : ClipRRect(
-                                borderRadius: BorderRadius.circular(14),
-                                child: Stack(
-                                  children: [
-                                    // Web-safe: Image.memory instead of Image.file
-                                    Image.memory(_imageBytes!, height: 200, width: double.infinity, fit: BoxFit.cover),
-                                    Positioned(
-                                      top: 10,
-                                      right: 10,
-                                      child: CircleAvatar(
-                                        backgroundColor: Colors.black54,
-                                        child: IconButton(
-                                          icon: const Icon(Icons.refresh, color: Colors.white),
-                                          onPressed: () => _pickImage(ImageSource.camera),
-                                        ),
-                                      ),
-                                    )
-                                  ],
-                                ),
-                              ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // 3. DETAILS / TITLE & NOTES
-                    const Text(
-                      '3. Details (विवरण)',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _titleController,
-                      decoration: InputDecoration(
-                        labelText: 'Issue Title (समस्या का नाम)',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      ),
-                      validator: (val) {
-                        if (val == null || val.trim().isEmpty) {
-                          return 'Please provide a title (कृपया समस्या का नाम लिखें)';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _descController,
-                      maxLines: 2,
-                      decoration: InputDecoration(
-                        labelText: 'Optional Notes / Landmark (विवरण / पहचान)',
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // 4. URGENCY LEVEL SELECTOR
-                    const Text(
-                      '4. Urgency Level (तात्कालिकता)',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: _urgencyColor(_urgencyLevel).withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: _urgencyColor(_urgencyLevel).withValues(alpha: 0.3)),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                _urgencyLabel(_urgencyLevel),
-                                style: TextStyle(fontWeight: FontWeight.bold, color: _urgencyColor(_urgencyLevel)),
-                              ),
-                              Text(
-                                'Level $_urgencyLevel/5',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
-                              ),
-                            ],
-                          ),
-                          Slider(
-                            value: _urgencyLevel.toDouble(),
-                            min: 1,
-                            max: 5,
-                            divisions: 4,
-                            activeColor: _urgencyColor(_urgencyLevel),
-                            label: _urgencyLabel(_urgencyLevel),
-                            onChanged: (val) => setState(() => _urgencyLevel = val.round()),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // 5. AFFECTED PEOPLE ESTIMATE
-                    const Text(
-                      '5. People Affected (प्रभावित लोग)',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: isDark ? theme.colorScheme.primaryContainer.withValues(alpha: 0.15) : Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: isDark ? theme.colorScheme.primary.withValues(alpha: 0.3) : Colors.blue.shade200),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                '~$_affectedPeople people daily',
-                                style: const TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                              const Icon(Icons.people, size: 20),
-                            ],
-                          ),
-                          Slider(
-                            value: _affectedPeople.toDouble(),
-                            min: 1,
-                            max: 500,
-                            divisions: 50,
-                            label: '$_affectedPeople people',
-                            onChanged: (val) => setState(() => _affectedPeople = val.round()),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // 6. GPS LOCATION DISPLAY & MAP PIN ADJUSTER
-                    Card(
-                      elevation: 0,
-                      color: isDark ? theme.colorScheme.primaryContainer.withValues(alpha: 0.2) : Colors.blue.shade50,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(color: isDark ? theme.colorScheme.primary.withValues(alpha: 0.3) : Colors.blue.shade200),
-                      ),
-                      child: ListTile(
-                        leading: const Icon(Icons.location_on, color: Colors.red, size: 32),
-                        title: Text(
-                          _resolvedAddress.isNotEmpty
-                              ? _resolvedAddress
-                              : (_currentPosition != null
-                                  ? 'GPS Locked: ${_currentPosition!.latitude.toStringAsFixed(4)}, ${_currentPosition!.longitude.toStringAsFixed(4)}'
-                                  : 'Fetching GPS Location...'),
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: const Text('Tap to view or adjust location pin (स्थान बदलें)'),
-                        trailing: Icon(Icons.edit_location, color: theme.colorScheme.primary),
-                        onTap: () async {
-                          final latlong.LatLng defaultLocation = _currentPosition != null
-                              ? latlong.LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
-                              : const latlong.LatLng(28.6139, 77.2090);
-
-                          final latlong.LatLng? pickedLocation = await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => OsmPickerScreen(initialLocation: defaultLocation),
-                            ),
-                          );
-
-                          if (pickedLocation != null) {
-                            setState(() {
-                              _currentPosition = Position(
-                                latitude: pickedLocation.latitude,
-                                longitude: pickedLocation.longitude,
-                                timestamp: DateTime.now(),
-                                accuracy: 1.0,
-                                altitude: 0.0,
-                                altitudeAccuracy: 0.0,
-                                heading: 0.0,
-                                headingAccuracy: 0.0,
-                                speed: 0.0,
-                                speedAccuracy: 0.0,
-                              );
-                            });
-                            _reverseGeocode(pickedLocation.latitude, pickedLocation.longitude);
-                          }
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-
-                    // 7. LIVE SEVERITY & 2-HOUR RAPID SURVEY PREVIEW
-                    _buildSeverityPreviewCard(theme, isDark),
-                    const SizedBox(height: 24),
-
-                    // 8. SUBMISSION BUTTON
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(56),
-                        backgroundColor: theme.colorScheme.primary,
-                        foregroundColor: theme.colorScheme.onPrimary,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        elevation: 4,
-                      ),
-                      icon: const Icon(Icons.send_rounded, size: 24),
-                      label: const Text(
-                        'SUBMIT REPORT (+15 XP) / जमा करें',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                      onPressed: _submitReport,
-                    )
-                  ],
-                ),
-              ),
-            ),
-    );
-  }
-
-  Widget _buildSeverityPreviewCard(ThemeData theme, bool isDark) {
-    final liveScore = SeverityEngine.calculateSeverityScore(
-      category: _selectedCategory,
-      urgencyLevel: _urgencyLevel,
-      affectedPeople: _affectedPeople,
-      upvotes: 0,
-      createdAt: DateTime.now(),
-    );
-    final tier = SeverityEngine.getSeverityTier(liveScore);
-    final tierColor = SeverityEngine.getTierColor(tier);
-    final tierLabel = SeverityEngine.getTierLabel(tier);
-    final slaLabel = SeverityEngine.getSlaLabel(tier);
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? theme.colorScheme.surfaceContainerHighest : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: tierColor.withValues(alpha: 0.5),
-          width: 1.5,
+        title: Text(
+          'Lodge Municipal Grievance',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: tierColor.withValues(alpha: 0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.analytics_rounded, color: tierColor, size: 22),
-              const SizedBox(width: 8),
-              const Text(
-                'AI & Math Severity Prediction',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-              ),
-              const Spacer(),
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            // Proactive Duplicate Detection Warning Banner
+            if (duplicate != null)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: tierColor,
-                  borderRadius: BorderRadius.circular(20),
+                  color: Colors.amber.withValues(alpha: isDark ? 0.15 : 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.amber.shade700, width: 1.5),
                 ),
-                child: Text(
-                  '$tier (${liveScore.toStringAsFixed(1)} / 100)',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Tier: $tierLabel',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: theme.colorScheme.onSurface,
-                      ),
+                    Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded, color: Colors.amber.shade800, size: 22),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '⚠️ Similar issue already reported nearby. You can upvote the existing ticket or proceed to submit a new one.',
+                            style: TextStyle(
+                              color: isDark ? Colors.amber.shade200 : Colors.amber.shade900,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Statutory Resolution SLA: $slaLabel',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: theme.colorScheme.onSurfaceVariant,
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  duplicate.title,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  '${duplicate.code} • ${duplicate.address}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          TextButton.icon(
+                            icon: const Icon(Icons.thumb_up_alt_rounded, size: 16),
+                            label: const Text('Upvote It'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFF006699),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(context);
+                            },
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: isDark ? Colors.amber.shade900.withValues(alpha: 0.2) : Colors.amber.shade50,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.amber.shade700.withValues(alpha: 0.3)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.bolt, color: Colors.amber.shade800, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '⚡ 2-Hour Rapid On-Site Survey opens upon submission for fast verification & ground hazard audit.',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.amber.shade200 : Colors.amber.shade900,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
-  Widget _categoryBox(String key, String label, IconData icon, Color color) {
-    final isSelected = _selectedCategory == key;
-    final theme = Theme.of(context);
-    return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          setState(() {
-            _selectedCategory = key;
-            _titleController.text = _getDefaultTitleForCategory(key);
-          });
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: isSelected ? color : theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isSelected ? color : theme.colorScheme.outlineVariant,
-              width: isSelected ? 2.5 : 1,
-            ),
-            boxShadow: isSelected ? [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 6)] : [],
-          ),
-          child: Column(
-            children: [
-              Icon(icon, size: 28, color: isSelected ? Colors.white : color),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: isSelected ? Colors.white : theme.colorScheme.onSurface,
+            // Live Severity & SLA Preview Card
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isDark
+                      ? [const Color(0xFF1E293B), const Color(0xFF0F172A)]
+                      : [const Color(0xFFEFF6FF), const Color(0xFFE0F2FE)],
+                ),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: sev.color.withValues(alpha: 0.4),
+                  width: 1.5,
                 ),
               ),
-            ],
-          ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.calculate_rounded, color: sev.color, size: 20),
+                          const SizedBox(width: 6),
+                          Text(
+                            '5-Variable Severity Score',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13,
+                              color: isDark ? Colors.grey.shade300 : const Color(0xFF1E293B),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: sev.color,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          '${sev.code} • ${sev.label}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Score: ${score.toStringAsFixed(1)} / 100',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                                color: sev.color,
+                              ),
+                            ),
+                            Text(
+                              'Statutory SLA: ${sev.slaHours < 24 ? "${sev.slaHours} Hours" : "${(sev.slaHours / 24).round()} Days"}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.grey.shade400 : Colors.grey.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF006699).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.timer_outlined, size: 16, color: Color(0xFF006699)),
+                            SizedBox(width: 4),
+                            Text(
+                              '2-Hr Rapid Survey',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF006699),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // 14 Hazard Categories Picker
+            Text(
+              'Select Civic Hazard Category',
+              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: kCivic14Categories.map((cat) {
+                final isSelected = cat.id == _selectedCategoryId;
+                return ChoiceChip(
+                  avatar: Icon(cat.icon, size: 16, color: isSelected ? Colors.white : cat.themeColor),
+                  label: Text(
+                    cat.englishName,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                      color: isSelected ? Colors.white : null,
+                    ),
+                  ),
+                  selected: isSelected,
+                  selectedColor: const Color(0xFF006699),
+                  onSelected: (selected) {
+                    if (selected) {
+                      setState(() {
+                        _selectedCategoryId = cat.id;
+                      });
+                    }
+                  },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 16),
+
+            // Title Field
+            TextFormField(
+              controller: _titleController,
+              decoration: const InputDecoration(
+                labelText: 'Incident Title *',
+                hintText: 'e.g. Broken Traffic Signal at Junction',
+                prefixIcon: Icon(Icons.title_rounded),
+                border: OutlineInputBorder(),
+              ),
+              validator: (v) => v == null || v.trim().isEmpty ? 'Title is required' : null,
+            ),
+            const SizedBox(height: 14),
+
+            // Description Field
+            TextFormField(
+              controller: _descriptionController,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Hazard Details & Observations *',
+                hintText: 'Describe public risk, obstruction, or danger...',
+                prefixIcon: Icon(Icons.description_outlined),
+                border: OutlineInputBorder(),
+              ),
+              validator: (v) => v == null || v.trim().isEmpty ? 'Description is required' : null,
+            ),
+            const SizedBox(height: 16),
+
+            // Urgency & Affected Scale Sliders
+            Text(
+              'Immediate Public Danger / Urgency',
+              style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            Slider(
+              value: _urgencyWeight,
+              min: 0,
+              max: 100,
+              divisions: 4,
+              label: _urgencyWeight <= 25
+                  ? 'Low (25)'
+                  : _urgencyWeight <= 50
+                      ? 'Moderate (50)'
+                      : _urgencyWeight <= 75
+                          ? 'High (75)'
+                          : 'Critical Emergency (100)',
+              activeColor: sev.color,
+              onChanged: (val) {
+                setState(() {
+                  _urgencyWeight = val;
+                });
+              },
+            ),
+
+            Text(
+              'Scale of Affected Commuters / Residents',
+              style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            Slider(
+              value: _affectedScaleWeight,
+              min: 0,
+              max: 100,
+              divisions: 4,
+              label: _affectedScaleWeight <= 25
+                  ? 'Individual property'
+                  : _affectedScaleWeight <= 50
+                      ? 'Local street'
+                      : _affectedScaleWeight <= 75
+                          ? 'Neighborhood'
+                          : 'Major arterial corridor',
+              activeColor: const Color(0xFF006699),
+              onChanged: (val) {
+                setState(() {
+                  _affectedScaleWeight = val;
+                });
+              },
+            ),
+            const SizedBox(height: 16),
+
+            // Location Picker with OSM integration
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: isDark ? Colors.grey.shade700 : Colors.grey.shade300,
+                ),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.location_on_rounded, color: Color(0xFF006699)),
+                          SizedBox(width: 6),
+                          Text('Incident Coordinates', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      TextButton.icon(
+                        icon: const Icon(Icons.map_rounded, size: 16),
+                        label: const Text('Pick on Map'),
+                        style: TextButton.styleFrom(foregroundColor: const Color(0xFF006699)),
+                        onPressed: () async {
+                          final loc = await Navigator.push<PickedLocation>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => OsmPickerScreen(
+                                initialLat: _latitude,
+                                initialLng: _longitude,
+                              ),
+                            ),
+                          );
+                          if (loc != null) {
+                            setState(() {
+                              _latitude = loc.latitude;
+                              _longitude = loc.longitude;
+                              _address = loc.address;
+                            });
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  Text(
+                    _address,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade700,
+                    ),
+                  ),
+                  Text(
+                    'GPS: Lat ${_latitude.toStringAsFixed(5)}, Lng ${_longitude.toStringAsFixed(5)}',
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Client-Side Compressed Photo Evidence Card
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: isDark ? Colors.grey.shade700 : Colors.grey.shade300,
+                ),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.camera_alt_rounded, color: Color(0xFF006699)),
+                          SizedBox(width: 6),
+                          Text(
+                            'Photo Evidence (फोटोग्राफिक साक्ष्य)',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                      TextButton.icon(
+                        icon: const Icon(Icons.add_photo_alternate_rounded, size: 16),
+                        label: Text(_selectedImageBytes == null ? 'Attach Photo' : 'Replace Photo'),
+                        style: TextButton.styleFrom(foregroundColor: const Color(0xFF006699)),
+                        onPressed: _isCompressingImage ? null : _pickAndCompressImage,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'In-memory web compression automatically resizes photos > 500 KB to max 1280px at 80% JPEG quality.',
+                    style: TextStyle(fontSize: 11, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                  ),
+                  if (_isCompressingImage) ...[
+                    const SizedBox(height: 12),
+                    LinearProgressIndicator(
+                      value: _compressionProgress,
+                      backgroundColor: Colors.grey.shade200,
+                      color: const Color(0xFF006699),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _compressionStatusText ?? 'Compressing photo buffer...',
+                      style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Color(0xFF006699)),
+                    ),
+                  ] else if (_selectedImageBytes != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF006699).withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(6),
+                              color: const Color(0xFF006699).withValues(alpha: 0.2),
+                            ),
+                            child: const Icon(Icons.image_rounded, color: Color(0xFF006699)),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Photo Optimized & Ready',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                ),
+                                Text(
+                                  _compressionStatusText ??
+                                      '${(_selectedImageBytes!.lengthInBytes / 1024).toStringAsFixed(0)} KB Web-Safe Buffer',
+                                  style: const TextStyle(fontSize: 11, color: Color(0xFF006699)),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 20),
+                            tooltip: 'Remove photo',
+                            onPressed: () {
+                              setState(() {
+                                _selectedImageBytes = null;
+                                _compressionStatusText = null;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Submit Button
+            FilledButton.icon(
+              icon: _isSubmitting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.send_rounded),
+              label: Text(_isSubmitting ? 'Lodging Grievance...' : 'Submit Official Civic Ticket'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF006699),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: _isSubmitting ? null : _submitReport,
+            ),
+          ],
         ),
       ),
     );

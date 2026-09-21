@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="civicGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0050c8" />
+      <stop offset="100%" stop-color="#1d68f2" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f88400" />
+      <stop offset="100%" stop-color="#fb923c" />
+    </linearGradient>
+  </defs>
+  <!-- Rounded App Icon Background -->
+  <rect width="512" height="512" rx="112" fill="url(#civicGrad)" />
+  
+  <!-- Subtle inner ambient glow ring -->
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="8" />
+
+  <!-- Landmark / Civic Shield Emblem -->
+  <g transform="translate(106, 96)" fill="#ffffff">
+    <!-- Pediment Roof -->
+    <path d="M150 20 L280 90 L20 90 Z" />
+    <rect x="10" y="90" width="280" height="20" rx="4" />
+    <!-- 4 Majestic Columns -->
+    <rect x="30" y="125" width="34" height="110" rx="6" />
+    <rect x="95" y="125" width="34" height="110" rx="6" />
+    <rect x="170" y="125" width="34" height="110" rx="6" />
+    <rect x="235" y="125" width="34" height="110" rx="6" />
+    <!-- Base -->
+    <rect x="10" y="245" width="280" height="26" rx="6" />
+    <rect x="0" y="275" width="300" height="22" rx="4" opacity="0.9" />
+  </g>
+
+  <!-- Live Pulse Beacon Badge -->
+  <circle cx="396" cy="116" r="42" fill="url(#accentGrad)" stroke="#ffffff" stroke-width="8" />
+  <path d="M396 96 L396 136 M376 116 L416 116" stroke="#ffffff" stroke-width="8" stroke-linecap="round" />
+</svg>
