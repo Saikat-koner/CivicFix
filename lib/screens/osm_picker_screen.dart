@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/geocoding_service.dart';
+import '../services/geo_service.dart';
 
 class PickedLocation {
   final double latitude;
@@ -88,14 +89,10 @@ class _OsmPickerScreenState extends State<OsmPickerScreen> {
     });
 
     try {
-      final res = await NominatimGeocodingService.reverseGeocode(
-        latitude: _currentLat,
-        longitude: _currentLng,
-      );
-
+      final address = await GeoService.reverseGeocode(_currentLat, _currentLng);
       if (mounted) {
         setState(() {
-          _resolvedAddress = res.formattedAddress;
+          _resolvedAddress = address;
           _isGeocoding = false;
         });
       }
@@ -349,7 +346,7 @@ class _OsmPickerScreenState extends State<OsmPickerScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.between,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Row(
                 children: [
@@ -542,9 +539,9 @@ class _OsmPickerScreenState extends State<OsmPickerScreen> {
   Widget _buildBottomConfirmBar(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: Colors.white,
-        border: const Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+        border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
       ),
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(

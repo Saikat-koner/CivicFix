@@ -428,11 +428,18 @@ CREATE POLICY "Users and admins can update appointments"
     ON officer_appointments FOR UPDATE
     USING (true);
 
--- Composite indexes for common queries
+-- Composite indexes for common queries & 1,000,000+ High Concurrency Workloads
 CREATE INDEX IF NOT EXISTS idx_issues_severity_status ON issues(severity_level, status);
 CREATE INDEX IF NOT EXISTS idx_issues_category_severity ON issues(category, severity_score DESC);
+CREATE INDEX IF NOT EXISTS idx_issues_status_created ON issues(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_issues_category_created ON issues(category, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_issues_user_created ON issues(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_issues_created_at ON issues(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_issues_active_severity ON issues(severity_score DESC) WHERE status NOT IN ('resolved_by_worker', 'community_verified');
+CREATE INDEX IF NOT EXISTS idx_issue_upvotes_user_issue ON issue_upvotes(user_id, issue_id);
 CREATE INDEX IF NOT EXISTS idx_issue_comments_created ON issue_comments(issue_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_issue_verifications_created ON issue_verifications(issue_id, verified_at DESC);
+CREATE INDEX IF NOT EXISTS idx_officer_appointments_status_slot ON officer_appointments(status, slot_time DESC);
 
 -- ============================================================================
 -- 9. PERMISSIONS & HELPER FUNCTIONS
@@ -440,3 +447,13 @@ CREATE INDEX IF NOT EXISTS idx_issue_verifications_created ON issue_verification
 
 GRANT EXECUTE ON FUNCTION calculate_severity(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION get_sla_breach_risks(INTEGER) TO authenticated;
+
+-- ============================================================================
+-- 10. HIGH-CONCURRENCY ARCHITECTURE CONFIGURATION (1,000,000+ USERS)
+-- ============================================================================
+-- For production high-throughput deployments:
+-- 1. PgBouncer / Supavisor connection pooling mode should be set to 'transaction'.
+-- 2. Client queries must utilize range-based pagination (.range(start, end)).
+-- 3. In-memory Stale-While-Revalidate (SWR) caching with 45s TTL prevents redundant read queries.
+-- 4. Truncated 4-decimal spatial grid cache in client layer limits reverse-geocoding load.
+-- ============================================================================
