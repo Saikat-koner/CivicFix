@@ -1193,7 +1193,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       pin: regPin || '123456',
       phone: regPhone || loginPhone || '+91 9213472684',
       district: regDistrict,
-      role: selectedRole,
+      role: 'citizen', // Municipal policy: Public registration produces verified Citizen IDs only. Admin IDs must be provisioned by an existing admin.
       avatar: regAvatar,
       emailVerified: true,
       phoneVerified: true,
@@ -1704,36 +1704,51 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               )}
             </button>
 
-            {/* Quick Test Shortcuts */}
-            <div className="pt-2 flex items-center justify-between border-t border-gray-100 text-xs">
-              <button
-                type="button"
-                onClick={() => setAuthMode('register')}
-                className="text-[#0050c8] font-bold hover:underline cursor-pointer"
-              >
-                Create New Citizen Account
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('forgot');
-                  setErrorMessage(null);
-                  setSuccessToast(null);
-                  if (loginEmail) {
-                    if (loginEmail.includes('@')) {
-                      setForgotEmail(loginEmail);
-                      setForgotChannel('email');
-                    } else {
-                      setForgotPhone(loginEmail);
-                      setForgotChannel('phone');
+            {/* Quick Test Shortcuts & Admin Governance Notice */}
+            <div className="pt-2.5 flex flex-col gap-2.5 border-t border-gray-100 text-xs">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRole('citizen');
+                    setAuthMode('register');
+                  }}
+                  className="text-[#0050c8] font-bold hover:underline cursor-pointer"
+                >
+                  Create New Citizen Account
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode('forgot');
+                    setErrorMessage(null);
+                    setSuccessToast(null);
+                    if (loginEmail) {
+                      if (loginEmail.includes('@')) {
+                        setForgotEmail(loginEmail);
+                        setForgotChannel('email');
+                      } else {
+                        setForgotPhone(loginEmail);
+                        setForgotChannel('phone');
+                      }
                     }
-                  }
-                }}
-                className="text-[#56596e] hover:text-[#0050c8] font-bold cursor-pointer flex items-center gap-1"
-              >
-                <KeyRound className="w-3.5 h-3.5 text-[#0050c8]" />
-                <span>Forgot Password?</span>
-              </button>
+                  }}
+                  className="text-[#56596e] hover:text-[#0050c8] font-bold cursor-pointer flex items-center gap-1"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-[#0050c8]" />
+                  <span>Forgot Password?</span>
+                </button>
+              </div>
+
+              {selectedRole === 'admin' && (
+                <div className="p-3 rounded-2xl bg-amber-50/90 border border-amber-200/80 text-[11px] text-amber-950 flex items-start gap-2.5 leading-relaxed">
+                  <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-extrabold text-amber-900 block">Official Admin ID Policy</span>
+                    Admin IDs cannot be self-registered. If an official requires an Admin ID, it must be officially minted and provided by the active Administrator from the City Command Provisioning Portal.
+                  </div>
+                </div>
+              )}
             </div>
           </form>
         )}

@@ -71,9 +71,9 @@ export const DEDICATED_ADMIN_ACCOUNT: RegisteredUserAccount = {
   permanentUserId: 'CFX-ADM-0001-HQ',
   name: 'Saikat Koner (Executive Admin)',
   email: 'saikatkoner4@gmail.com',
-  password: 'Sk@226407',
-  pin: '226407',
-  adminPin: '226407',
+  password: 'Sk@2264',
+  pin: '2264',
+  adminPin: '2264',
   phone: '+91 90601 17097',
   district: 'Municipal Headquarters & Executive Directorate',
   role: 'admin',
@@ -107,11 +107,11 @@ export function getRegisteredUsers(): RegisteredUserAccount[] {
         modified = true;
       }
       if (u.role === 'admin' && !u.adminPin) {
-        u.adminPin = '226407';
+        u.adminPin = '2264';
         modified = true;
       }
       if (!u.pin) {
-        u.pin = u.role === 'admin' ? '226407' : '123456';
+        u.pin = u.role === 'admin' ? '2264' : '123456';
         modified = true;
       }
     }
@@ -125,10 +125,10 @@ export function getRegisteredUsers(): RegisteredUserAccount[] {
     );
     if (adminIndex >= 0) {
       users[adminIndex].email = 'saikatkoner4@gmail.com';
-      users[adminIndex].password = 'Sk@226407';
+      users[adminIndex].password = 'Sk@2264';
       users[adminIndex].role = 'admin';
-      users[adminIndex].pin = '226407';
-      users[adminIndex].adminPin = '226407';
+      users[adminIndex].pin = '2264';
+      users[adminIndex].adminPin = '2264';
       users[adminIndex].name = 'Saikat Koner (Executive Admin)';
       modified = true;
     } else {
@@ -212,6 +212,18 @@ export function registerNewUser(data: {
 
     // Generate unique permanent ID that remains their ID forever
     const userRole = data.role || 'citizen';
+
+    // Strict Admin Creation Policy: Admin IDs can only be created and provided by an existing active administrator
+    if (userRole === 'admin') {
+      const currentSession = getCurrentSession();
+      if (!currentSession || currentSession.role !== 'admin') {
+        return {
+          success: false,
+          error: 'Access Denied: Admin IDs cannot be self-registered. New Admin accounts must be created and provided by an existing administrator.',
+        };
+      }
+    }
+
     const permanentId = generatePermanentCitizenId(userRole);
 
     const defaultAvatar = userRole === 'admin'
@@ -281,6 +293,79 @@ export function registerNewUser(data: {
   }
 }
 
+/**
+ * Provision a New Admin ID
+ * Enforces the core policy: "if any one wants admin id it will be made and provided by the previous admin only"
+ */
+export function provisionNewAdminByPreviousAdmin(data: {
+  name: string;
+  email: string;
+  password?: string;
+  pin?: string;
+  phone?: string;
+  district?: string;
+  department?: string;
+}): { success: boolean; error?: string; adminAccount?: RegisteredUserAccount } {
+  try {
+    const currentSession = getCurrentSession();
+    if (!currentSession || currentSession.role !== 'admin') {
+      return {
+        success: false,
+        error: 'Access Denied: Only an active administrator can create and provide new Admin IDs.',
+      };
+    }
+
+    const cleanEmail = (data.email || '').trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return { success: false, error: 'Please enter a valid official email address.' };
+    }
+
+    const cleanName = (data.name || '').trim();
+    if (!cleanName) {
+      return { success: false, error: 'Please enter the official Administrator full name.' };
+    }
+
+    const dupCheck = checkDuplicateCitizenAccount(cleanEmail, data.phone || '');
+    if (dupCheck.isDuplicate) {
+      return { success: false, error: dupCheck.message || 'An account already exists with this email or phone.' };
+    }
+
+    const users = getRegisteredUsers();
+    const permanentAdminId = generatePermanentCitizenId('admin');
+    const adminPassword = (data.password || '').trim() || 'Sk@2264';
+    const adminPin = (data.pin || '').trim() || '2264';
+
+    const newAdmin: RegisteredUserAccount = {
+      id: permanentAdminId,
+      permanentUserId: permanentAdminId,
+      name: cleanName,
+      email: cleanEmail,
+      password: adminPassword,
+      pin: adminPin,
+      adminPin: adminPin,
+      phone: data.phone?.trim() || '+91 80 2297 5500',
+      district: data.district || data.department || 'Municipal Executive Directorate',
+      role: 'admin',
+      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
+      issuesResolved: 0,
+      civicCredits: 10000,
+      badges: ['Municipal Officer', 'Authorized Admin', data.department || 'Field Director'],
+      createdAt: new Date().toISOString(),
+      emailVerified: true,
+      phoneVerified: true,
+      contactVerified: true,
+      firstReportSubmitted: true,
+    };
+
+    users.push(newAdmin);
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+
+    return { success: true, adminAccount: newAdmin };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to provision admin account.' };
+  }
+}
+
 export function authenticateUser(
   emailOrPhone: string,
   passwordOrPin: string,
@@ -299,7 +384,15 @@ export function authenticateUser(
       cleanIdentifier === 'saikatkoner4' ||
       (normPhone && normPhone.endsWith('9060117097'));
 
-    if (isSaikatAdmin && (cleanPass === 'Sk@226407' || cleanPass === 'sk@226407' || cleanPass === '226407')) {
+    if (
+      isSaikatAdmin &&
+      (cleanPass === 'Sk@2264' ||
+        cleanPass === 'sk@2264' ||
+        cleanPass === '2264' ||
+        cleanPass === 'Sk@226407' ||
+        cleanPass === 'sk@226407' ||
+        cleanPass === '226407')
+    ) {
       const adminContributor: Contributor = {
         id: DEDICATED_ADMIN_ACCOUNT.id,
         permanentUserId: DEDICATED_ADMIN_ACCOUNT.permanentUserId,
@@ -326,7 +419,7 @@ export function authenticateUser(
 
     if (
       (cleanIdentifier === 'admin@civicfix.gov' || cleanIdentifier === 'admin' || cleanIdentifier === 'commissioner@citygov.metro') &&
-      (cleanPass === 'admin' || cleanPass === 'admin123' || cleanPass === 'admin2026' || cleanPass === '226407')
+      (cleanPass === 'admin' || cleanPass === 'admin123' || cleanPass === 'admin2026' || cleanPass === 'Sk@2264' || cleanPass === '2264' || cleanPass === '226407')
     ) {
       if (!providedAdminPin) {
         return {
@@ -399,7 +492,7 @@ export function authenticateUser(
 
     // If user has admin role or targetRole is admin, enforce Admin Security PIN
     if (foundUser.role === 'admin' || targetRole === 'admin') {
-      const expectedPin = foundUser.adminPin || foundUser.pin || '226407';
+      const expectedPin = foundUser.adminPin || foundUser.pin || '2264';
       if (!providedAdminPin && !isPinMatch) {
         return {
           success: false,
@@ -718,8 +811,8 @@ const SESSION_STORAGE_KEY = 'civicfix_active_browser_session_v1';
 
 export function getCurrentSession(): UserSessionData | null {
   try {
-    // Only return session if active in current browser session
-    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    // Return session if active in current browser session or persistent session
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY) || localStorage.getItem(STORAGE_KEYS.SESSION);
     return raw ? (JSON.parse(raw) as UserSessionData) : null;
   } catch {
     return null;

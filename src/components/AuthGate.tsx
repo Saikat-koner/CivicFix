@@ -239,7 +239,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
         password: regPassword,
         phone: regPhone.trim(),
         district: regDistrict,
-        role: role,
+        role: 'citizen',
         avatar: selectedAvatar,
       });
 
@@ -410,6 +410,7 @@ export const AuthGate: React.FC<AuthGateProps> = ({
                 type="button"
                 onClick={() => {
                   setTab('register');
+                  setRole('citizen');
                   setErrorMessage(null);
                   soundFX.playClick();
                 }}
