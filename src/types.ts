@@ -372,6 +372,15 @@ export interface CivicImageScanResult {
   defects: CivicDefectItem[];
   totalDefectsFound: number;
   multiDefectSummary?: string;
+
+  // Strict Moderation, NSFW & Civic Domain Relevance Flags
+  isSafe?: boolean;
+  isNsfw?: boolean;
+  isCivicRelated?: boolean;
+  rejectionCategory?: 'NSFW_OR_EXPLICIT' | 'NON_CIVIC_IMAGE' | 'LOW_QUALITY_OR_UNREADABLE';
+  rejectionReason?: string;
+  suggestedAction?: string;
+  detectedNonCivicObjects?: string[];
 }
 
 export interface SmartWasteBin {

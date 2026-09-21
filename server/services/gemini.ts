@@ -68,13 +68,24 @@ export interface CivicImageScanResult {
   defects: CivicDefectItem[];
   totalDefectsFound: number;
   multiDefectSummary?: string;
+
+  // Strict Moderation, NSFW & Civic Domain Relevance Flags
+  isSafe?: boolean;
+  isNsfw?: boolean;
+  isCivicRelated?: boolean;
+  rejectionCategory?: 'NSFW_OR_EXPLICIT' | 'NON_CIVIC_IMAGE' | 'LOW_QUALITY_OR_UNREADABLE';
+  rejectionReason?: string;
+  suggestedAction?: string;
+  detectedNonCivicObjects?: string[];
 }
 
 /**
  * Multimodal AI Image Scanner using Gemini 3.8 Flash Vision
  * Inspects real photographs captured from camera or uploaded by citizens.
- * Performs a comprehensive FULL-IMAGE scan across the entire frame.
- * If 2, 3, or more distinct defects are present, detects and analyzes ALL of them.
+ * Performs a comprehensive 3-stage inspection:
+ * Stage 1: Zero-tolerance NSFW & adult content moderation
+ * Stage 2: Strict civic domain relevance validation (rejects selfies, pets, food, indoor rooms, etc.)
+ * Stage 3: Full-frame multi-defect infrastructure inspection across all quadrants
  */
 export async function scanCivicImage(
   imageInput: string,
@@ -123,16 +134,68 @@ export async function scanCivicImage(
       return fallbackImageScan(imageInput, options);
     }
 
-    const prompt = `You are the AI Municipal Infrastructure & Computer Vision Inspector for civic grievance reporting.
+    const prompt = `You are the AI Municipal Infrastructure & Computer Vision Inspector for civic grievance reporting with strict content moderation and domain validation.
 
-CRITICAL INSTRUCTION - FULL-IMAGE MULTI-DEFECT INSPECTION:
-1. Examine the ENTIRE photograph from edge to edge (all quadrants: foreground, midground, background, road surface, curbs, sidewalks, walls, overhead fixtures/cables, signage, vegetation, and surroundings). DO NOT focus only on a single isolated part or crop.
-2. If there are 2, 3, or more different hazards, physical defects, or infrastructure issues visible in the image (e.g. road pothole + fatigue cracking, pothole + standing water, broken curb + sidewalk slab breach, bent sign + sightline obstruction, overflowing trash + sidewalk blockage, downed timber + blocked lane, hanging wire + broken luminaire, clogged drain + pooling), YOU MUST DETECT AND ANALYZE ALL OF THEM! Do not ignore secondary or co-occurring defects.
-3. For EACH defect found, output an entry in the "defects" array with an accurate bounding box reticle (in CSS percentage strings like "25%", "30%"), specific defect name, category, severity, responsible department, visual clues, and clear description.
-4. If there is only 1 defect in the entire photograph, return 1 item in "defects". If there are 2, 3, or more, return ALL of them in "defects".
+INSPECTION PIPELINE - 3-STAGE COMPREHENSIVE VALIDATION:
+
+========================================
+STAGE 1: NSFW, NUDITY & ADULT CONTENT MODERATION (ZERO TOLERANCE)
+========================================
+- Analyze the entire image for nudity, exposed intimate body parts, lingerie/underwear, erotic/sexually suggestive poses, sexual violence, gore, or graphic harm.
+- IF ANY explicit, nude, or adult content is detected:
+  - "isSafe": false
+  - "isNsfw": true
+  - "isCivicRelated": false
+  - "rejectionCategory": "NSFW_OR_EXPLICIT"
+  - "rejectionReason": "This image contains adult, explicit, or inappropriate visual material violating municipal portal policy."
+  - "suggestedAction": "Please capture and upload only photos of public physical infrastructure defects (potholes, streetlights, garbage, water leaks, etc.)."
+  - "issueType": "Rejected Content: Explicit or Inappropriate Image"
+  - "title": "Submission Rejected: Inappropriate Image"
+  - "description": "This photo cannot be accepted because it violates content safety standards."
+  - "whatsThatSummary": "Content moderation filter triggered: Adult or explicit visual material detected."
+  - "audioSpeechText": "Notice: Image rejected. Inappropriate or adult visual content detected. Please photograph only municipal infrastructure issues."
+  - "totalDefectsFound": 0
+  - "defects": []
+
+========================================
+STAGE 2: CIVIC DOMAIN RELEVANCE FILTERING
+========================================
+- The platform accepts ONLY real municipal infrastructure hazards (potholes, asphalt cracks, broken streetlights, water pipe bursts, drainage overflows, clogged storm grates, overflowing garbage/dumpsters, damaged traffic signs/signals, fallen trees, buckled sidewalks, dangling wires, damaged parks/playgrounds, etc.).
+- IF THE IMAGE IS NOT CIVIC INFRASTRUCTURE (e.g. personal selfies, human faces/portraits, pets/animals without civic emergency, food/dining dishes, indoor bedrooms/living rooms/kitchens, indoor furniture, electronic/computer screens, receipts, documents, memes, cartoons, wallpapers, or code screenshots):
+  - "isSafe": true
+  - "isNsfw": false
+  - "isCivicRelated": false
+  - "rejectionCategory": "NON_CIVIC_IMAGE"
+  - "detectedNonCivicObjects": ["Personal Selfie" or "Indoor Furniture" or "Food Dish" or "Pet Animal" or "Document"]
+  - "rejectionReason": "The uploaded photo depicts a non-civic scene or object rather than public municipal infrastructure."
+  - "suggestedAction": "Please photograph an outdoor public infrastructure defect such as a road pothole, leaking pipe, broken streetlight, or garbage dump."
+  - "issueType": "Non-Civic Subject Detected"
+  - "title": "Non-Civic Image Detected"
+  - "description": "The uploaded photo does not contain municipal infrastructure defects."
+  - "whatsThatSummary": "Domain filter notice: Detected non-civic objects. The municipal grievance portal only accepts public physical infrastructure issues."
+  - "audioSpeechText": "Notice: The scanner detected non-civic objects. Please photograph outdoor municipal infrastructure issues like road damage, water leaks, or waste."
+  - "totalDefectsFound": 0
+  - "defects": []
+
+========================================
+STAGE 3: FULL-FRAME MULTI-DEFECT CIVIC INSPECTION (When isSafe=true AND isCivicRelated=true)
+========================================
+- "isSafe": true
+- "isNsfw": false
+- "isCivicRelated": true
+- Examine the ENTIRE photograph from edge to edge (all quadrants: foreground, midground, background, road surface, curbs, sidewalks, overhead fixtures/cables, signage, vegetation, and surroundings). DO NOT focus only on a single isolated part.
+- If there are 2, 3, or more different hazards or infrastructure issues visible in the image (e.g. road pothole + fatigue cracking + water ponding, or bent sign + dark crosswalk, overflowing trash + sidewalk blockage, downed timber + blocked lane, hanging wire + broken luminaire, clogged drain + pooling), YOU MUST DETECT AND ANALYZE ALL OF THEM!
+- For EACH defect found, output an entry in "defects" with accurate bounding box reticle (in CSS percentage strings like "25%", "30%"), specific defect name, category, severity, responsible department, visual clues, and clear description.
 
 Return a strictly formatted JSON object with NO markdown formatting, NO backticks, and NO fences:
 {
+  "isSafe": true,
+  "isNsfw": false,
+  "isCivicRelated": true,
+  "rejectionCategory": null,
+  "rejectionReason": null,
+  "suggestedAction": null,
+  "detectedNonCivicObjects": [],
   "totalDefectsFound": 2,
   "defects": [
     {
@@ -152,33 +215,15 @@ Return a strictly formatted JSON object with NO markdown formatting, NO backtick
         "height": "CSS percentage (e.g. '42%')",
         "label": "DEFECT #1: Asphalt Cavity"
       }
-    },
-    {
-      "id": "defect-2",
-      "name": "Specific descriptive name of defect 2 (e.g. 'Alligator Fatigue Cracking & Asphalt Spalling')",
-      "category": "Roads" | "Utilities" | "Parks" | "Traffic" | "Sanitation" | "Safety",
-      "severity": "Low" | "Medium" | "High",
-      "urgency": "Routine" | "Priority" | "Critical",
-      "department": "Name of responsible municipal division",
-      "description": "Factual 1-2 sentence description of defect 2",
-      "clues": ["Visual clue 1", "Visual clue 2"],
-      "confidence": 95.8,
-      "reticle": {
-        "top": "CSS percentage (e.g. '12%')",
-        "left": "CSS percentage (e.g. '6%')",
-        "width": "CSS percentage (e.g. '88%')",
-        "height": "CSS percentage (e.g. '70%')",
-        "label": "DEFECT #2: Surface Cracking"
-      }
     }
   ],
-  "issueType": "Overall primary issue synthesis (e.g. 'Asphalt Cavity with Surrounding Fatigue Cracking')",
+  "issueType": "Overall primary issue synthesis",
   "category": "Roads" | "Utilities" | "Parks" | "Traffic" | "Sanitation" | "Safety",
   "severity": "Low" | "Medium" | "High",
   "title": "A concise, formal municipal report title under 60 chars",
-  "description": "A clear, factual 2-sentence description summarizing all observed defects across the full scene",
-  "whatsThatSummary": "A vivid, insightful 2-3 sentence answer explaining all visible defects detected across the entire image and transit risks",
-  "audioSpeechText": "A natural spoken voice text: 'What is that? The full-spectrum AI scanner detected [N] distinct defects across this scene: first, [Defect 1]; second, [Defect 2]...'",
+  "description": "A clear, factual 2-sentence description summarizing all observed defects",
+  "whatsThatSummary": "A vivid, insightful 2-3 sentence answer explaining all visible defects and risks",
+  "audioSpeechText": "A natural spoken voice text: 'What is that? The full-spectrum AI scanner detected [N] distinct defects across this scene...'",
   "department": "Primary responsible municipal agency",
   "confidence": 97.8,
   "clues": ["Key visual clues synthesizing the entire scene"],
@@ -214,6 +259,57 @@ Return a strictly formatted JSON object with NO markdown formatting, NO backtick
     const responseText = response.text?.trim() || '';
     const cleanJson = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(cleanJson);
+
+    // Check for Moderation / NSFW or Non-Civic Rejections
+    const isSafe = parsed.isSafe !== false && parsed.isNsfw !== true;
+    const isNsfw = parsed.isNsfw === true || parsed.isSafe === false;
+    const isCivicRelated = isSafe && parsed.isCivicRelated !== false;
+
+    if (!isSafe || isNsfw || !isCivicRelated) {
+      const rejectionCategory = isNsfw
+        ? 'NSFW_OR_EXPLICIT'
+        : (parsed.rejectionCategory || 'NON_CIVIC_IMAGE');
+      const rejectionReason = parsed.rejectionReason || (
+        isNsfw
+          ? 'Adult, explicit, or inappropriate content detected.'
+          : 'The uploaded image depicts a non-civic subject rather than public municipal infrastructure.'
+      );
+      const suggestedAction = parsed.suggestedAction || (
+        isNsfw
+          ? 'Please photograph only public physical infrastructure defects.'
+          : 'Please capture a clear photo of an outdoor municipal defect such as a pothole, broken streetlight, or garbage overflow.'
+      );
+
+      return {
+        isSafe: !isNsfw,
+        isNsfw,
+        isCivicRelated: false,
+        rejectionCategory,
+        rejectionReason,
+        suggestedAction,
+        detectedNonCivicObjects: Array.isArray(parsed.detectedNonCivicObjects) ? parsed.detectedNonCivicObjects : [],
+        issueType: isNsfw ? 'Content Moderation Rejection' : 'Non-Civic Image Rejection',
+        category: 'Safety',
+        severity: 'High',
+        title: isNsfw ? 'Submission Blocked: Inappropriate Content' : 'Submission Blocked: Non-Civic Image',
+        description: rejectionReason,
+        whatsThatSummary: rejectionReason,
+        audioSpeechText: parsed.audioSpeechText || `Notice: Image rejected. ${rejectionReason} ${suggestedAction}`,
+        department: 'Municipal Content Moderation & AI Safety Cell',
+        confidence: 99.0,
+        clues: [rejectionCategory, rejectionReason],
+        reticle: {
+          top: '20%',
+          left: '20%',
+          width: '60%',
+          height: '60%',
+          label: isNsfw ? 'REJECTED: Explicit Content' : 'REJECTED: Non-Civic Subject',
+        },
+        defects: [],
+        totalDefectsFound: 0,
+        multiDefectSummary: rejectionReason,
+      };
+    }
 
     // Map and sanitize defects array
     const rawDefects = Array.isArray(parsed.defects) ? parsed.defects : [];
@@ -266,6 +362,9 @@ Return a strictly formatted JSON object with NO markdown formatting, NO backtick
     const totalFound = Math.max(formattedDefects.length, Number(parsed.totalDefectsFound) || 1);
 
     return {
+      isSafe: true,
+      isNsfw: false,
+      isCivicRelated: true,
       issueType: parsed.issueType || primaryDefect.name || 'Civic Infrastructure Hazard',
       category: validateCategory(parsed.category || primaryDefect.category),
       severity: validateSeverity(parsed.severity || primaryDefect.severity),
@@ -305,8 +404,8 @@ function validateSeverity(sev: any): 'Low' | 'Medium' | 'High' {
 
 /**
  * Intelligent taxonomy-based fallback classifier
- * Generates distinctive, diverse recognitions across 16 different categories
- * instead of returning a repetitive static string.
+ * Generates distinctive, diverse recognitions across multiple categories
+ * and enforces strict NSFW and non-civic domain moderation.
  */
 function fallbackImageScan(
   imageInput: string,
@@ -314,6 +413,85 @@ function fallbackImageScan(
 ): CivicImageScanResult {
   const hint = ((options?.filename || '') + ' ' + (options?.userHint || '') + ' ' + imageInput).toLowerCase();
 
+  // STAGE 1: Check for NSFW / Adult Content
+  const nsfwKeywords = [
+    'nude', 'naked', 'nsfw', 'erotic', 'sex', 'boob', 'penis', 'vagina',
+    'porn', 'undress', 'underwear', 'lingerie', 'bikini', 'cleavage', 'adult'
+  ];
+  if (nsfwKeywords.some(k => hint.includes(k))) {
+    return {
+      isSafe: false,
+      isNsfw: true,
+      isCivicRelated: false,
+      rejectionCategory: 'NSFW_OR_EXPLICIT',
+      rejectionReason: 'Adult, explicit, or inappropriate content detected violating municipal portal policy.',
+      suggestedAction: 'Please capture and upload only photos of public physical infrastructure defects.',
+      issueType: 'Rejected Content: Explicit or Inappropriate Image',
+      category: 'Safety',
+      severity: 'High',
+      title: 'Submission Blocked: Inappropriate Content',
+      description: 'This photo cannot be accepted because it violates content safety standards.',
+      whatsThatSummary: 'Content moderation filter triggered: Adult or explicit visual material detected.',
+      audioSpeechText: 'Notice: Image rejected. Inappropriate or adult visual content detected. Please photograph only municipal infrastructure issues.',
+      department: 'Municipal Content Moderation & AI Safety Cell',
+      confidence: 99.0,
+      clues: ['NSFW_OR_EXPLICIT', 'Adult visual content detected'],
+      reticle: {
+        top: '20%',
+        left: '20%',
+        width: '60%',
+        height: '60%',
+        label: 'REJECTED: Explicit Content',
+      },
+      defects: [],
+      totalDefectsFound: 0,
+      multiDefectSummary: 'Adult, explicit, or inappropriate content detected.',
+    };
+  }
+
+  // STAGE 2: Check for Non-Civic Subjects (Selfies, Food, Pets, Indoor Furniture, Documents, Screenshots)
+  const nonCivicKeywords = [
+    'selfie', 'portrait', 'face', 'person', 'me.jpg', 'photo_of_me', 'my_pic',
+    'food', 'dish', 'pizza', 'burger', 'coffee', 'snack', 'meal',
+    'pet', 'dog', 'puppy', 'cat', 'kitten',
+    'indoor', 'bedroom', 'living_room', 'sofa', 'couch', 'bed',
+    'tv', 'laptop', 'screen', 'receipt', 'bill', 'document', 'paper',
+    'code', 'screenshot', 'meme', 'wallpaper', 'art', 'drawing'
+  ];
+  const matchedNonCivic = nonCivicKeywords.filter(k => hint.includes(k));
+  if (matchedNonCivic.length > 0) {
+    return {
+      isSafe: true,
+      isNsfw: false,
+      isCivicRelated: false,
+      rejectionCategory: 'NON_CIVIC_IMAGE',
+      detectedNonCivicObjects: matchedNonCivic.map(s => s.toUpperCase()),
+      rejectionReason: 'The uploaded photo depicts a non-civic scene or object rather than public municipal infrastructure.',
+      suggestedAction: 'Please photograph an outdoor public infrastructure defect such as a road pothole, leaking pipe, broken streetlight, or garbage dump.',
+      issueType: 'Non-Civic Subject Detected',
+      category: 'Safety',
+      severity: 'Medium',
+      title: 'Submission Blocked: Non-Civic Image',
+      description: 'The uploaded photo does not contain municipal infrastructure defects.',
+      whatsThatSummary: 'Domain filter notice: Detected non-civic objects. The municipal grievance portal only accepts public physical infrastructure issues.',
+      audioSpeechText: 'Notice: The scanner detected non-civic objects. Please photograph outdoor municipal infrastructure issues like road damage, water leaks, or waste.',
+      department: 'Municipal Content Moderation & AI Safety Cell',
+      confidence: 98.0,
+      clues: ['NON_CIVIC_IMAGE', ...matchedNonCivic],
+      reticle: {
+        top: '20%',
+        left: '20%',
+        width: '60%',
+        height: '60%',
+        label: 'REJECTED: Non-Civic Subject',
+      },
+      defects: [],
+      totalDefectsFound: 0,
+      multiDefectSummary: 'Non-civic scene or object detected.',
+    };
+  }
+
+  // STAGE 3: Valid Civic Infrastructure Defects
   // 1. Streetlight & Electrical
   if (hint.includes('light') || hint.includes('lamp') || hint.includes('luminaire') || hint.includes('pole') || hint.includes('bulb')) {
     const defects: CivicDefectItem[] = [
@@ -356,6 +534,9 @@ function fallbackImageScan(
     ];
 
     return {
+      isSafe: true,
+      isNsfw: false,
+      isCivicRelated: true,
       issueType: 'Streetlight Luminaire Failure & Hazardous Crossing Blackout',
       category: 'Utilities',
       severity: 'High',
@@ -415,6 +596,9 @@ function fallbackImageScan(
     ];
 
     return {
+      isSafe: true,
+      isNsfw: false,
+      isCivicRelated: true,
       issueType: 'Pressurized Water Main Rupture & Subgrade Washout',
       category: 'Utilities',
       severity: 'High',
@@ -474,6 +658,9 @@ function fallbackImageScan(
     ];
 
     return {
+      isSafe: true,
+      isNsfw: false,
+      isCivicRelated: true,
       issueType: 'Overflowing Solid Waste Dumpster & Sidewalk Refuse Spillage',
       category: 'Sanitation',
       severity: 'High',
@@ -533,6 +720,9 @@ function fallbackImageScan(
     ];
 
     return {
+      isSafe: true,
+      isNsfw: false,
+      isCivicRelated: true,
       issueType: 'Buckled Sidewalk Slab & Root Upheaval Hazards',
       category: 'Roads',
       severity: 'High',
@@ -592,6 +782,9 @@ function fallbackImageScan(
     ];
 
     return {
+      isSafe: true,
+      isNsfw: false,
+      isCivicRelated: true,
       issueType: 'Bent Regulatory Traffic Sign & Blind Intersection',
       category: 'Traffic',
       severity: 'High',
@@ -651,6 +844,9 @@ function fallbackImageScan(
     ];
 
     return {
+      isSafe: true,
+      isNsfw: false,
+      isCivicRelated: true,
       issueType: 'Heavy Downed Tree Limb Blocking Road & Bike Lane',
       category: 'Safety',
       severity: 'High',
@@ -710,6 +906,9 @@ function fallbackImageScan(
     ];
 
     return {
+      isSafe: true,
+      isNsfw: false,
+      isCivicRelated: true,
       issueType: 'Damaged Playground Swing & Safety Mat Breach',
       category: 'Parks',
       severity: 'High',
@@ -769,6 +968,9 @@ function fallbackImageScan(
     ];
 
     return {
+      isSafe: true,
+      isNsfw: false,
+      isCivicRelated: true,
       issueType: 'Clogged Stormwater Grate & Roadside Ponding',
       category: 'Utilities',
       severity: 'Medium',
@@ -828,6 +1030,9 @@ function fallbackImageScan(
     ];
 
     return {
+      isSafe: true,
+      isNsfw: false,
+      isCivicRelated: true,
       issueType: 'Dangling Electrical Cable & Damaged Utility Pole',
       category: 'Safety',
       severity: 'High',
@@ -907,6 +1112,9 @@ function fallbackImageScan(
   ];
 
   return {
+    isSafe: true,
+    isNsfw: false,
+    isCivicRelated: true,
     issueType: 'Severe Asphalt Cavity, Alligator Fatigue Cracking & Water Ponding',
     category: 'Roads',
     severity: 'High',

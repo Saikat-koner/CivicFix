@@ -53,6 +53,9 @@ import {
   Trash2,
   X,
   ShieldCheck,
+  ShieldAlert,
+  Ban,
+  AlertOctagon,
   Smartphone,
   Mail
 } from 'lucide-react';
@@ -761,6 +764,17 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
   const [aiClues, setAiClues] = useState<string[]>(VERIFIED_SAMPLE_PHOTOS[0].clues);
   const [aiReticle, setAiReticle] = useState(VERIFIED_SAMPLE_PHOTOS[0].reticle);
 
+  // Content Moderation & Civic Relevance Guardrails State
+  const [moderationRejection, setModerationRejection] = useState<{
+    isNsfw?: boolean;
+    isSafe?: boolean;
+    isCivicRelated?: boolean;
+    rejectionCategory?: string;
+    rejectionReason?: string;
+    suggestedAction?: string;
+    detectedNonCivicObjects?: string[];
+  } | null>(null);
+
   // Live Multimodal Gemini 3.8 Flash Verification State
   const [isLiveAiVerified, setIsLiveAiVerified] = useState(false);
   const [aiVerificationBadge, setAiVerificationBadge] = useState('Verified by Gemini 3.8 Flash');
@@ -1119,6 +1133,47 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
         const json = await res.json();
         if (json && json.success && json.data) {
           const result = json.data as CivicImageScanResult;
+
+          // Check if image failed safety moderation or civic domain validation
+          const isExplicitOrNsfw = result.isSafe === false || result.isNsfw === true;
+          const isNotCivic = result.isCivicRelated === false;
+
+          if (isExplicitOrNsfw || isNotCivic) {
+            soundFX.playAlert();
+            setModerationRejection({
+              isNsfw: isExplicitOrNsfw,
+              isSafe: result.isSafe,
+              isCivicRelated: result.isCivicRelated,
+              rejectionCategory: result.rejectionCategory || (isExplicitOrNsfw ? 'NSFW_OR_EXPLICIT' : 'NON_CIVIC_IMAGE'),
+              rejectionReason: result.rejectionReason || (isExplicitOrNsfw
+                ? 'Adult, explicit, or inappropriate content detected. This violates municipal safety standards.'
+                : 'The uploaded image depicts a non-civic subject rather than public municipal infrastructure.'),
+              suggestedAction: result.suggestedAction || (isExplicitOrNsfw
+                ? 'Please photograph only public physical infrastructure defects.'
+                : 'Please capture a clear photo of an outdoor municipal defect such as a pothole, broken streetlight, or garbage overflow.'),
+              detectedNonCivicObjects: Array.isArray(result.detectedNonCivicObjects) ? result.detectedNonCivicObjects : [],
+            });
+            setDetectedDefects([]);
+            setSelectedDefectId('all');
+            setAiDetectedIssue(result.issueType || 'Submission Blocked');
+            setAiSeverity('High');
+            setTitle(result.title || 'Submission Blocked');
+            setDescription(result.description || result.rejectionReason || 'Image rejected by content safety guardrails.');
+            setAiWhatsThat(result.whatsThatSummary || result.rejectionReason || 'This image cannot be accepted for municipal reporting.');
+            setAiSpeechText(result.audioSpeechText || 'Notice: Image rejected. Inappropriate or non-civic content detected.');
+            setAiDepartment(result.department || 'Municipal Content Moderation & AI Safety Cell');
+            setAiConfidence(result.confidence || 99.0);
+            if (Array.isArray(result.clues) && result.clues.length > 0) {
+              setAiClues(result.clues);
+            }
+            if (result.reticle) {
+              setAiReticle(result.reticle);
+            }
+            return;
+          }
+
+          // Valid Civic Infrastructure Image
+          setModerationRejection(null);
           setAiDetectedIssue(result.issueType || 'Detected Civic Hazard');
           setAiSeverity(result.severity || 'Medium');
           setCategory(result.category || 'Roads');
@@ -1402,6 +1457,7 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
     }
     stopCameraStream();
 
+    setModerationRejection(null);
     setCurrentSample(sample);
     setSelectedPhoto(sample.url);
     setAiAnalyzing(true);
@@ -1924,6 +1980,37 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
             </div>
           )}
 
+          {/* Content Moderation / Non-Civic Rejection Alert Banner */}
+          {moderationRejection && (
+            <div className={`p-4 border rounded-2xl flex items-start gap-3 shadow-xs animate-in fade-in ${
+              moderationRejection.isNsfw
+                ? 'bg-rose-50 border-rose-300 text-rose-900'
+                : 'bg-amber-50 border-amber-300 text-amber-900'
+            }`}>
+              {moderationRejection.isNsfw ? (
+                <ShieldAlert className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
+              ) : (
+                <AlertOctagon className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              )}
+              <div className="flex-1 space-y-1">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h4 className="text-xs font-black uppercase tracking-wider">
+                    {moderationRejection.isNsfw ? '⚠️ Content Blocked: Inappropriate or Adult Content' : '⚠️ Photo Rejected: Non-Civic Subject'}
+                  </h4>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-white/80 border border-current/20">
+                    Content Safety Guardrail Active
+                  </span>
+                </div>
+                <p className="text-xs leading-relaxed font-semibold">
+                  {moderationRejection.rejectionReason}
+                </p>
+                <p className="text-[11px] font-medium opacity-90">
+                  👉 {moderationRejection.suggestedAction}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Bento Grid: Left Photo or Live Video Stream, Right "What's That" Detailed Card */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Photo Container with Live Scan HUD (7 Cols) */}
@@ -1986,8 +2073,60 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
                     <img
                       src={selectedPhoto}
                       alt="Civic hazard photograph"
-                      className="w-full h-full object-cover max-h-[360px] rounded-xl transition-all duration-300 group-hover:scale-102"
+                      className={`w-full h-full object-cover max-h-[360px] rounded-xl transition-all duration-300 group-hover:scale-102 ${
+                        moderationRejection?.isNsfw ? 'blur-xl grayscale' : ''
+                      }`}
                     />
+
+                    {/* Moderation / Non-Civic Rejection Overlay */}
+                    {moderationRejection && (
+                      <div className={`absolute inset-0 z-30 flex flex-col items-center justify-center p-6 text-center backdrop-blur-md ${
+                        moderationRejection.isNsfw
+                          ? 'bg-rose-950/92 text-white'
+                          : 'bg-amber-950/90 text-white'
+                      }`}>
+                        <div className={`p-3 rounded-full mb-2 ring-4 ${
+                          moderationRejection.isNsfw
+                            ? 'bg-rose-600/30 ring-rose-500/50 text-rose-400'
+                            : 'bg-amber-600/30 ring-amber-500/50 text-amber-400'
+                        }`}>
+                          {moderationRejection.isNsfw ? (
+                            <ShieldAlert className="w-8 h-8" />
+                          ) : (
+                            <AlertOctagon className="w-8 h-8" />
+                          )}
+                        </div>
+                        <span className="text-[10px] font-mono font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-white/15 mb-1.5">
+                          {moderationRejection.isNsfw ? 'CONTENT SAFETY REJECTION' : 'NON-CIVIC DOMAIN REJECTION'}
+                        </span>
+                        <h3 className="text-sm font-black text-white max-w-sm mb-1">
+                          {moderationRejection.isNsfw ? 'Explicit or Inappropriate Image Blocked' : 'Non-Civic Subject Detected'}
+                        </h3>
+                        <p className="text-[11px] text-gray-200 max-w-md leading-relaxed mb-3">
+                          {moderationRejection.rejectionReason}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              soundFX.playClick();
+                              handleSelectSamplePhoto(VERIFIED_SAMPLE_PHOTOS[0]);
+                            }}
+                            className="px-3.5 py-1.5 bg-white text-[#121c28] hover:bg-gray-100 font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer"
+                          >
+                            Choose Verified Sample
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleStartCamera}
+                            className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>Open Camera</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Top Multi-Defect Scene Banner */}
                     <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-auto z-10 flex-wrap gap-1">
@@ -2233,78 +2372,156 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      soundFX.playClick();
-                      setShowManualDefectModal(true);
-                    }}
-                    className="px-2.5 py-1 rounded-full text-[11px] font-black bg-[#0050c8] hover:bg-[#1d68f2] text-white flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
-                    title="Add defect manually with 10 - 1000 words description"
-                  >
-                    <Plus className="w-3 h-3 text-emerald-300" />
-                    <span>+ Add Defect</span>
-                  </button>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-[#10B981]/15 text-[#047857] border border-[#10B981]/30">
-                    {detectedDefects.length} Defects
-                  </span>
+                  {!moderationRejection && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setShowManualDefectModal(true);
+                        }}
+                        className="px-2.5 py-1 rounded-full text-[11px] font-black bg-[#0050c8] hover:bg-[#1d68f2] text-white flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                        title="Add defect manually with 10 - 1000 words description"
+                      >
+                        <Plus className="w-3 h-3 text-emerald-300" />
+                        <span>+ Add Defect</span>
+                      </button>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-[#10B981]/15 text-[#047857] border border-[#10B981]/30">
+                        {detectedDefects.length} Defects
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Multi-Defect Navigation Tabs */}
-              {detectedDefects.length > 0 && (
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-                  <button
-                    type="button"
-                    onClick={handleSelectAllDefects}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-colors cursor-pointer ${
-                      selectedDefectId === 'all'
-                        ? 'bg-[#0050c8] text-white shadow-xs'
-                        : 'bg-white text-[#424655] border border-[#c2c6d7] hover:bg-gray-50'
-                    }`}
-                  >
-                    All Defects ({detectedDefects.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      soundFX.playClick();
-                      setShowManualDefectModal(true);
-                    }}
-                    className="px-3 py-1.5 rounded-xl text-xs font-black whitespace-nowrap transition-colors cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs flex items-center gap-1"
-                    title="Add a defect manually (10 to 1,000 words requirement)"
-                  >
-                    <PlusCircle className="w-3.5 h-3.5" />
-                    <span>+ Add Manual Defect</span>
-                  </button>
-                  {detectedDefects.map((d, idx) => {
-                    const isSelected = selectedDefectId === d.id;
-                    return (
+              {/* MODERATION REJECTION VIEW */}
+              {moderationRejection ? (
+                <div className="space-y-3.5 animate-in fade-in">
+                  <div className={`p-4 rounded-xl border shadow-2xs space-y-2.5 ${
+                    moderationRejection.isNsfw
+                      ? 'bg-rose-50 border-rose-200 text-rose-950'
+                      : 'bg-amber-50 border-amber-200 text-amber-950'
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      {moderationRejection.isNsfw ? (
+                        <ShieldAlert className="w-5 h-5 text-rose-600 flex-shrink-0" />
+                      ) : (
+                        <AlertOctagon className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                      )}
+                      <h4 className="text-xs font-black uppercase tracking-wider">
+                        {moderationRejection.isNsfw ? 'Content Safety Rejection' : 'Non-Civic Image Rejection'}
+                      </h4>
+                    </div>
+
+                    <p className="text-xs leading-relaxed font-semibold">
+                      {moderationRejection.rejectionReason}
+                    </p>
+
+                    {moderationRejection.detectedNonCivicObjects && moderationRejection.detectedNonCivicObjects.length > 0 && (
+                      <div className="pt-2 border-t border-amber-200/70">
+                        <span className="text-[10px] font-black uppercase tracking-wider block text-amber-900 mb-1">
+                          Detected Non-Civic Elements:
+                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {moderationRejection.detectedNonCivicObjects.map((obj, i) => (
+                            <span key={i} className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                              {obj}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-white p-4 rounded-xl border border-[#c2c6d7] shadow-2xs space-y-2.5">
+                    <span className="text-[10px] font-extrabold text-[#737686] uppercase tracking-wider block">
+                      Required Action & Accepted Standards
+                    </span>
+                    <p className="text-xs text-[#121c28] leading-relaxed font-medium">
+                      {moderationRejection.suggestedAction || 'Please upload or capture a photo showing public municipal physical infrastructure (e.g. potholes, broken streetlights, garbage heaps, water leaks).'}
+                    </p>
+                    <div className="pt-2 border-t border-gray-100 flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold text-[#56596e]">Accepted Public Infrastructure Categories:</span>
+                      <div className="grid grid-cols-2 gap-1 text-[10px] text-[#424655]">
+                        <span className="flex items-center gap-1">🕳️ Roads & Potholes</span>
+                        <span className="flex items-center gap-1">🗑️ Garbage Overflow</span>
+                        <span className="flex items-center gap-1">💡 Broken Streetlights</span>
+                        <span className="flex items-center gap-1">🚰 Water Pipe Leakage</span>
+                        <span className="flex items-center gap-1">🚽 Drain Blockages</span>
+                        <span className="flex items-center gap-1">🌳 Fallen Trees</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
                       <button
-                        key={d.id}
                         type="button"
-                        onClick={() => handleSelectDefect(d)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1 ${
-                          isSelected
-                            ? 'bg-[#1d68f2] text-white shadow-xs'
+                        onClick={() => {
+                          soundFX.playClick();
+                          handleSelectSamplePhoto(VERIFIED_SAMPLE_PHOTOS[0]);
+                        }}
+                        className="w-full py-2 px-3 bg-[#0050c8] hover:bg-[#1d68f2] text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer text-center"
+                      >
+                        Reset with Verified Sample Photo
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Multi-Defect Navigation Tabs */}
+                  {detectedDefects.length > 0 && (
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                      <button
+                        type="button"
+                        onClick={handleSelectAllDefects}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-colors cursor-pointer ${
+                          selectedDefectId === 'all'
+                            ? 'bg-[#0050c8] text-white shadow-xs'
                             : 'bg-white text-[#424655] border border-[#c2c6d7] hover:bg-gray-50'
                         }`}
                       >
-                        <span className={`w-2 h-2 rounded-full ${
-                          d.severity === 'High'
-                            ? 'bg-rose-500'
-                            : d.severity === 'Medium'
-                            ? 'bg-amber-500'
-                            : 'bg-emerald-500'
-                        }`} />
-                        <span>#{idx + 1} {d.name}</span>
+                        All Defects ({detectedDefects.length})
                       </button>
-                    );
-                  })}
-                </div>
-              )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          soundFX.playClick();
+                          setShowManualDefectModal(true);
+                        }}
+                        className="px-3 py-1.5 rounded-xl text-xs font-black whitespace-nowrap transition-colors cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs flex items-center gap-1"
+                        title="Add a defect manually (10 to 1,000 words requirement)"
+                      >
+                        <PlusCircle className="w-3.5 h-3.5" />
+                        <span>+ Add Manual Defect</span>
+                      </button>
+                      {detectedDefects.map((d, idx) => {
+                        const isSelected = selectedDefectId === d.id;
+                        return (
+                          <button
+                            key={d.id}
+                            type="button"
+                            onClick={() => handleSelectDefect(d)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1 ${
+                              isSelected
+                                ? 'bg-[#1d68f2] text-white shadow-xs'
+                                : 'bg-white text-[#424655] border border-[#c2c6d7] hover:bg-gray-50'
+                            }`}
+                          >
+                            <span className={`w-2 h-2 rounded-full ${
+                              d.severity === 'High'
+                                ? 'bg-rose-500'
+                                : d.severity === 'Medium'
+                                ? 'bg-amber-500'
+                                : 'bg-emerald-500'
+                            }`} />
+                            <span>#{idx + 1} {d.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
 
-              {/* CONTENT VIEW: ALL DEFECTS OVERVIEW */}
+                  {/* CONTENT VIEW: ALL DEFECTS OVERVIEW */}
               {selectedDefectId === 'all' ? (
                 <div className="space-y-3.5">
                   {/* Scene-Wide Synthesis Box */}
@@ -2578,6 +2795,8 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
                   </div>
                 </div>
               )}
+                </>
+              )}
             </div>
           </div>
 
@@ -2643,22 +2862,36 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
             >
               Cancel
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                soundFX.playClick();
-                if (window.speechSynthesis) {
-                  window.speechSynthesis.cancel();
-                  setIsSpeaking(false);
-                }
-                stopCameraStream();
-                setCurrentStep(2);
-              }}
-              className="bg-[#0050c8] hover:bg-[#1d68f2] text-white font-extrabold text-sm px-7 py-3 rounded-full flex items-center gap-2 shadow-sm transition-transform active:scale-95 cursor-pointer"
-            >
-              <span>Next: Set Location</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-3">
+              {moderationRejection && (
+                <span className="text-xs font-bold text-rose-600 flex items-center gap-1.5">
+                  <ShieldAlert className="w-4 h-4" />
+                  <span>Cannot proceed with non-civic/rejected photo</span>
+                </span>
+              )}
+              <button
+                type="button"
+                disabled={moderationRejection !== null || aiAnalyzing}
+                onClick={() => {
+                  if (moderationRejection) return;
+                  soundFX.playClick();
+                  if (window.speechSynthesis) {
+                    window.speechSynthesis.cancel();
+                    setIsSpeaking(false);
+                  }
+                  stopCameraStream();
+                  setCurrentStep(2);
+                }}
+                className={`font-extrabold text-sm px-7 py-3 rounded-full flex items-center gap-2 shadow-sm transition-transform active:scale-95 ${
+                  moderationRejection !== null || aiAnalyzing
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed opacity-60'
+                    : 'bg-[#0050c8] hover:bg-[#1d68f2] text-white cursor-pointer'
+                }`}
+              >
+                <span>Next: Set Location</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}
