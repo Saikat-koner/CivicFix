@@ -379,11 +379,13 @@ html.dark span.text-white,
   padding-right: env(safe-area-inset-right, 0px);
 }
 
-/* Ensure Leaflet map controls do not overlap mobile safe areas */
-.leaflet-top {
+/* Ensure MapLibre GL map controls do not overlap mobile safe areas */
+.maplibregl-ctrl-top-left,
+.maplibregl-ctrl-top-right {
   top: max(10px, env(safe-area-inset-top, 0px));
 }
-.leaflet-bottom {
+.maplibregl-ctrl-bottom-left,
+.maplibregl-ctrl-bottom-right {
   bottom: max(10px, env(safe-area-inset-bottom, 0px));
 }
 

@@ -661,7 +661,7 @@ function getDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): 
  * Always returns curated segments within 40km of the target center,
  * or dynamically synthesizes realistic arterial traffic segments around the center point!
  */
-export function getActiveTrafficSegments(centerLat: number, centerLng: number): TrafficSegment[] {
+export function getActiveTrafficSegments(centerLat: number = 28.6139, centerLng: number = 77.2090): TrafficSegment[] {
   const nearbyCurated = CURATED_TRAFFIC_SEGMENTS.filter((seg) => {
     if (!seg.coordinates[0]) return false;
     const [cLat, cLng] = seg.coordinates[0];
@@ -731,7 +731,7 @@ export function getActiveTrafficSegments(centerLat: number, centerLng: number): 
 /**
  * Returns active infrastructure hotspots around current map center
  */
-export function getActiveInfrastructureHotspots(centerLat: number, centerLng: number): InfrastructureHotspot[] {
+export function getActiveInfrastructureHotspots(centerLat: number = 28.6139, centerLng: number = 77.2090): InfrastructureHotspot[] {
   const nearbyCurated = CURATED_INFRASTRUCTURE_HOTSPOTS.filter((hotspot) => {
     return getDistanceKm(centerLat, centerLng, hotspot.location.lat, hotspot.location.lng) <= 50;
   });
@@ -829,7 +829,7 @@ export function getActiveInfrastructureHotspots(centerLat: number, centerLng: nu
 /**
  * Returns active municipal ward boundary polygons around current map center
  */
-export function getActiveWardBoundaries(centerLat: number, centerLng: number): WardBoundary[] {
+export function getActiveWardBoundaries(centerLat: number = 28.6139, centerLng: number = 77.2090): WardBoundary[] {
   const nearbyCurated = CURATED_WARD_BOUNDARIES.filter((ward) => {
     return getDistanceKm(centerLat, centerLng, ward.centroid.lat, ward.centroid.lng) <= 50;
   });

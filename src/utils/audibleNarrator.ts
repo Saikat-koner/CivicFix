@@ -153,8 +153,8 @@ class AudibleNarratorService {
   private isSpeaking: boolean = false;
   private listeners: SubtitleListener[] = [];
   private speakingListeners: SpeakingListener[] = [];
-  private speechUtterance: SpeechSynthesisUtterance | null = null;
   private speechRate: number = 1.0;
+  private speechUtterance: SpeechSynthesisUtterance | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -252,6 +252,11 @@ class AudibleNarratorService {
   public t(key: string): string {
     const langDict = TRANSLATION_DICTIONARY[this.currentLanguage] || TRANSLATION_DICTIONARY.en;
     return langDict[key] || TRANSLATION_DICTIONARY.en[key] || key;
+  }
+
+  public speakIssue(issue: { title: string; category?: string; address?: string; status?: string; upvotes?: number }) {
+    const text = `Civic report: ${issue.title}. Category: ${issue.category || 'General'}. Located at ${issue.address || 'nearby location'}. Status is ${issue.status || 'open'} with ${issue.upvotes || 0} citizen endorsements.`;
+    this.speak(text, undefined, true);
   }
 
   public speak(englishText: string, localizedText?: string, force = true) {
