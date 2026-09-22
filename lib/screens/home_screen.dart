@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/issue.dart';
+import '../services/offline_sync_service.dart';
 import 'profile_screen.dart';
 import 'issue_detail_screen.dart';
 import 'report_issue_screen.dart';
@@ -45,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _isGuestMode = widget.isGuest;
     _tabController = TabController(length: 3, vsync: this);
     _issues = _generateInitialIssues();
+    OfflineSyncService.initialize();
   }
 
   @override
@@ -410,6 +412,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // Offline Sync & Network Health Banner
+        _buildOfflineSyncBanner(isDark),
+
         // Live Municipal KPI Ticker Bar
         _buildKpiTickerCard(isDark, criticalCount, rapidSurveyCount, resolvedCount),
         const SizedBox(height: 12),
@@ -503,6 +508,120 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         else
           ...issues.map((issue) => _buildIssueCard(issue, isDark)),
       ],
+    );
+  }
+
+  /// Offline Synchronization & Connectivity Bar
+  Widget _buildOfflineSyncBanner(bool isDark) {
+    return ValueListenableBuilder<int>(
+      valueListenable: OfflineSyncService.pendingCountNotifier,
+      builder: (context, pendingCount, _) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: OfflineSyncService.isSyncingNotifier,
+          builder: (context, isSyncing, _) {
+            return ValueListenableBuilder<bool>(
+              valueListenable: OfflineSyncService.isOnlineNotifier,
+              builder: (context, isOnline, _) {
+                if (pendingCount == 0 && isOnline && !isSyncing) {
+                  return const SizedBox.shrink();
+                }
+
+                final isOfflineMode = !isOnline;
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isOfflineMode
+                        ? (isDark ? const Color(0xFF451A03) : const Color(0xFFFEF3C7))
+                        : (isDark ? const Color(0xFF064E3B) : const Color(0xFFD1FAE5)),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isOfflineMode ? const Color(0xFFF59E0B) : const Color(0xFF10B981),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        isOfflineMode
+                            ? Icons.cloud_off_rounded
+                            : (isSyncing ? Icons.sync_rounded : Icons.cloud_done_rounded),
+                        color: isOfflineMode ? const Color(0xFFD97706) : const Color(0xFF059669),
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isOfflineMode
+                                  ? 'Offline / Low-Bandwidth Mode Active'
+                                  : (isSyncing
+                                      ? 'Synchronizing Grievance Queue...'
+                                      : 'All Queued Grievances Synchronized'),
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: isOfflineMode ? const Color(0xFF92400E) : const Color(0xFF065F46),
+                              ),
+                            ),
+                            Text(
+                              pendingCount > 0
+                                  ? '$pendingCount report(s) queued locally. Auto-sync on connection.'
+                                  : (isOfflineMode
+                                      ? 'Reports will queue locally and sync when back online.'
+                                      : 'Backend healthy and verified.'),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isOfflineMode ? const Color(0xFFB45309) : const Color(0xFF047857),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (pendingCount > 0 && !isSyncing)
+                        TextButton.icon(
+                          icon: const Icon(Icons.refresh_rounded, size: 14),
+                          label: const Text('Sync Now', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                          style: TextButton.styleFrom(
+                            backgroundColor: isOfflineMode
+                                ? const Color(0xFFD97706).withValues(alpha: 0.15)
+                                : const Color(0xFF059669).withValues(alpha: 0.15),
+                            foregroundColor: isOfflineMode ? const Color(0xFF92400E) : const Color(0xFF065F46),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          ),
+                          onPressed: () async {
+                            final synced = await OfflineSyncService.syncAllPending(
+                              onIssueSynced: (syncedIssue) {
+                                setState(() {
+                                  _issues.removeWhere((i) => i.id == syncedIssue.id);
+                                  _issues.insert(0, syncedIssue);
+                                });
+                              },
+                            );
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    synced > 0
+                                        ? 'Successfully synchronized $synced queued report(s)!'
+                                        : 'Network unavailable. Will retry automatically.',
+                                  ),
+                                  backgroundColor: synced > 0 ? const Color(0xFF059669) : const Color(0xFFD97706),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 

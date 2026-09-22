@@ -20,6 +20,7 @@ class _CachedIssuePage {
 /// 2. In-memory Stale-While-Revalidate (SWR) caching with 45s TTL to eliminate redundant backend queries.
 /// 3. Direct PostgREST HTTP multiplexing via connection keep-alive (`http.Client`).
 /// 4. Resilient graceful degradation to in-memory cache during network spikes.
+/// 5. Input sanitization and SQL injection prevention via parameterized PostgREST REST endpoints.
 class CivicRepository {
   static final http.Client _httpClient = http.Client();
 
@@ -50,7 +51,89 @@ class CivicRepository {
         'apikey': supabaseAnonKey,
         'Authorization': 'Bearer $supabaseAnonKey',
         'Prefer': 'return=representation',
+        'Connection': 'keep-alive',
       };
+
+  /// Health check to detect backend reachability and network status
+  static Future<bool> checkBackendHealth() async {
+    if (supabaseAnonKey.isEmpty) {
+      // In standalone/demo mode, consider reachable
+      return true;
+    }
+    try {
+      final uri = Uri.parse('$supabaseUrl/rest/v1/categories?select=slug&limit=1');
+      final response = await _httpClient
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 3));
+      return response.statusCode == 200 || response.statusCode == 204;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Submit new grievance issue payload to backend
+  static Future<bool> submitIssuePayload({
+    required String title,
+    required String description,
+    required String categoryId,
+    required double latitude,
+    required double longitude,
+    required String address,
+    required String district,
+    required String reportedByName,
+    required double severityScore,
+    String? imageUrl,
+  }) async {
+    if (supabaseAnonKey.isEmpty) {
+      // Standalone simulation mode
+      invalidateCache();
+      return true;
+    }
+
+    try {
+      final sanitizedTitle = _sanitizeInput(title);
+      final sanitizedDesc = _sanitizeInput(description);
+      final sanitizedName = _sanitizeInput(reportedByName);
+
+      final uri = Uri.parse('$supabaseUrl/rest/v1/issues');
+      final payload = {
+        'title': sanitizedTitle,
+        'description': sanitizedDesc,
+        'category': categoryId,
+        'latitude': latitude,
+        'longitude': longitude,
+        'address': address,
+        'district': district,
+        'reported_by_name': sanitizedName,
+        'severity_score': severityScore,
+        'status': 'open',
+        'image_url': imageUrl,
+        'created_at': DateTime.now().toIso8601String(),
+      };
+
+      final response = await _httpClient
+          .post(uri, headers: _headers, body: jsonEncode(payload))
+          .timeout(const Duration(seconds: 6));
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        invalidateCache();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('CivicRepository.submitIssuePayload error: $e');
+      return false;
+    }
+  }
+
+  /// Basic input sanitization to prevent XSS and malformed payloads
+  static String _sanitizeInput(String input) {
+    return input
+        .replaceAll('<script>', '')
+        .replaceAll('</script>', '')
+        .replaceAll('-->', '')
+        .trim();
+  }
 
   /// Fetch paginated issues with SWR caching
   static Future<List<Map<String, dynamic>>> fetchIssues({

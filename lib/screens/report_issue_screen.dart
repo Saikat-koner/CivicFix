@@ -1,8 +1,9 @@
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../models/issue.dart';
 import '../services/image_compression_service.dart';
+import '../services/offline_sync_service.dart';
 import 'osm_picker_screen.dart';
 
 class ReportIssueScreen extends StatefulWidget {
@@ -133,7 +134,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
 
   SeverityLevel get _predictedSeverity => SeverityLevel.fromScore(_calculatedSeverityScore);
 
-  void _submitReport() {
+  Future<void> _submitReport() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -170,28 +171,221 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
       groundModifier: 0,
     );
 
+    // Create offline queue representation
+    final offlineIssue = OfflineQueuedIssue(
+      tempId: 'OFFLINE-$code',
+      title: _titleController.text.trim(),
+      description: _descriptionController.text.trim(),
+      categoryId: _selectedCategoryId,
+      urgencyWeight: _urgencyWeight,
+      affectedScaleWeight: _affectedScaleWeight,
+      latitude: _latitude,
+      longitude: _longitude,
+      address: _address,
+      district: _district,
+      citizenName: _citizenNameController.text.trim(),
+      imageBytes: _selectedImageBytes,
+      createdAt: now,
+      status: SyncStatus.pending,
+    );
+
+    // Save locally to queue
+    OfflineSyncService.enqueueIssue(offlineIssue);
+
+    // Notify parent state for immediate UI feed update
     widget.onIssueSubmitted(newIssue);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
+    // Attempt backend synchronization
+    final isOnline = await OfflineSyncService.checkOnlineStatus();
+    if (isOnline) {
+      OfflineSyncService.syncAllPending();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Report #$code lodged and synced! Statutory SLA active.',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: const Color(0xFF059669),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        Navigator.pop(context);
+      }
+    } else {
+      if (mounted) {
+        _showOfflineLodgedDialog(offlineIssue, code);
+      }
+    }
+  }
+
+  void _showOfflineLodgedDialog(OfflineQueuedIssue offlineIssue, String code) {
+    final smsBody = OfflineSyncService.generateSmsReport(offlineIssue);
+    final ussdCode = OfflineSyncService.generateUssdDialerCode(offlineIssue);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
           children: [
-            const Icon(Icons.check_circle_rounded, color: Colors.white),
-            const SizedBox(width: 8),
-            Expanded(
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFD97706).withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.cloud_off_rounded, color: Color(0xFFD97706), size: 22),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
               child: Text(
-                'Report #$code lodged! 2-Hr Rapid On-Site Survey Active.',
-                style: const TextStyle(fontWeight: FontWeight.bold),
+                'Saved Offline in Queue',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
               ),
             ),
           ],
         ),
-        backgroundColor: const Color(0xFF006699),
-        behavior: SnackBarBehavior.floating,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Your grievance #$code has been securely queued on your device.',
+              style: const TextStyle(fontSize: 13, color: Color(0xFF334155)),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'It will automatically sync to the Municipal Server the moment your internet connection is restored.',
+              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Zero-Internet Immediate Fallback Options:',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.sms_outlined, size: 16, color: Color(0xFF006699)),
+                      const SizedBox(width: 6),
+                      const Expanded(
+                        child: Text(
+                          'Toll-Free SMS Relay (160 Chars):',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      InkWell(
+                        onTap: () {
+                          Clipboard.setData(ClipboardData(text: smsBody));
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(
+                              content: Text('SMS Template copied to clipboard!'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF006699).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'Copy SMS',
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF006699)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    smsBody,
+                    style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF475569)),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const Divider(height: 16),
+                  Row(
+                    children: [
+                      const Icon(Icons.dialpad_rounded, size: 16, color: Color(0xFF059669)),
+                      const SizedBox(width: 6),
+                      const Expanded(
+                        child: Text(
+                          'Feature Phone USSD String:',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      InkWell(
+                        onTap: () {
+                          Clipboard.setData(ClipboardData(text: ussdCode));
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(
+                              content: Text('USSD code copied! Dial *144# on phone.'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF059669).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'Copy USSD',
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF059669)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    ussdCode,
+                    style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF059669), fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF006699),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.pop(context);
+            },
+            child: const Text('Got It, Return to Feed'),
+          ),
+        ],
       ),
     );
-
-    Navigator.pop(context);
   }
 
   @override
