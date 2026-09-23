@@ -52,6 +52,9 @@ async function startServer() {
   // Middle-end Central Error Handler for API routes
   app.use('/api', errorHandler);
 
+  // Serve static assets from public/ folder (manifest, icons, service worker, workers)
+  app.use(express.static(path.join(process.cwd(), 'public')));
+
   // Vite Middleware / Static Serving
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

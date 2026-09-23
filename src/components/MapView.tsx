@@ -1,6 +1,18 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as maplibregl from 'maplibre-gl';
+import { setWorkerUrl } from 'maplibre-gl';
 import type { Map as MapLibreMap, Marker as MapLibreMarker, Popup as MapLibrePopup } from 'maplibre-gl';
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+
+// Initialize MapLibre Worker URL explicitly for Vite bundling compatibility
+if (typeof window !== 'undefined') {
+  try {
+    setWorkerUrl(maplibreWorkerUrl || '/maplibre-gl-worker.mjs');
+  } catch (err) {
+    console.warn('[MapLibre GL] Worker initialization notice in MapView:', err);
+  }
+}
+
 import {
   CivicIssue,
   IssueStatus,
@@ -68,14 +80,23 @@ import {
 } from 'lucide-react';
 
 export type MapTileLayer =
-  | 'osm'
-  | 'voyager'
+  | 'liberty'
+  | 'bright'
   | 'positron'
   | 'dark'
-  | 'hot'
+  | 'esri_streets'
+  | 'esri_canvas'
+  | 'satellite'
+  | 'esri_topo'
+  | 'esri_relief'
+  | 'natgeo'
+  | 'osm'
+  | 'voyager'
   | 'cyclosm'
-  | 'topo'
-  | 'satellite';
+  | 'hot'
+  | 'carto_voyager'
+  | 'carto_dark'
+  | 'topo';
 
 export interface MapViewProps {
   issues: CivicIssue[];
@@ -117,72 +138,48 @@ export interface PinnedMapLocation {
 }
 
 /**
- * OpenFreeMap & Raster Style Map Configurations for MapLibre GL
- * Provides 60 FPS GPU-rendered vector tiles with 3D buildings at zero API cost.
+ * Purpose-built Civic GIS Basemaps for Municipal Issue Tracking
+ * Provides 60 FPS GPU-rendered vector tiles with 3D buildings and high-resolution aerial imagery.
+ * 100% Free, ZERO API keys required, ZERO tokens, ZERO watermarks, and ZERO billing.
  */
-function getMapStyleSpec(layer: MapTileLayer, isDark: boolean): string | maplibregl.StyleSpecification {
-  // Vector Styles (OpenFreeMap)
-  if (layer === 'voyager' || (layer === 'osm' && !isDark)) {
-    return 'https://tiles.openfreemap.org/styles/liberty';
+function getMapStyleSpec(layer: MapTileLayer | string, isDark: boolean): string | maplibregl.StyleSpecification {
+  // 1. Satellite Aerial View (Esri World Imagery) - Essential for inspecting road damage, garbage dumps, tree falls
+  if (layer === 'satellite') {
+    return {
+      version: 8,
+      sources: {
+        'raster-tiles': {
+          type: 'raster',
+          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256,
+          attribution: '© Esri, Maxar, Earthstar Geographics',
+          maxzoom: 19,
+        },
+      },
+      layers: [
+        {
+          id: 'raster-layer',
+          type: 'raster',
+          source: 'raster-tiles',
+          minzoom: 0,
+          maxzoom: 22,
+        },
+      ],
+    };
   }
-  if (layer === 'dark' || (layer === 'osm' && isDark)) {
-    return 'https://tiles.openfreemap.org/styles/dark';
-  }
+
+  // 2. Clean Grayscale Focus Canvas (Positron) - Suppresses map clutter for high-density issue & heatmap focus
   if (layer === 'positron') {
     return 'https://tiles.openfreemap.org/styles/positron';
   }
 
-  // Raster fallback styles (OSM, Satellite, Topo, CyclOSM, HOT)
-  const rasterSources: Record<string, { tiles: string[]; attribution: string; maxzoom?: number }> = {
-    satellite: {
-      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
-      attribution: '© Esri, Maxar, Earthstar Geographics',
-      maxzoom: 19,
-    },
-    topo: {
-      tiles: ['https://tile.opentopomap.org/{z}/{x}/{y}.png'],
-      attribution: '© OpenStreetMap, © OpenTopoMap',
-      maxzoom: 17,
-    },
-    hot: {
-      tiles: ['https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png'],
-      attribution: '© OpenStreetMap contributors, HOT',
-      maxzoom: 19,
-    },
-    cyclosm: {
-      tiles: ['https://a.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png'],
-      attribution: '© OpenStreetMap contributors, CyclOSM',
-      maxzoom: 19,
-    },
-    osm: {
-      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-      attribution: '© OpenStreetMap contributors',
-      maxzoom: 19,
-    },
-  };
+  // 3. Night & Outages Dark Vector - High-contrast dark vector for reporting streetlight outages and night hazards
+  if (layer === 'dark' || layer === 'carto_dark') {
+    return 'https://tiles.openfreemap.org/styles/dark';
+  }
 
-  const src = rasterSources[layer] || rasterSources.osm;
-  return {
-    version: 8,
-    sources: {
-      'raster-tiles': {
-        type: 'raster',
-        tiles: src.tiles,
-        tileSize: 256,
-        attribution: src.attribution,
-        maxzoom: src.maxzoom || 19,
-      },
-    },
-    layers: [
-      {
-        id: 'raster-layer',
-        type: 'raster',
-        source: 'raster-tiles',
-        minzoom: 0,
-        maxzoom: 22,
-      },
-    ],
-  };
+  // 4. Default: Civic Street & Ward 3D Vector (Liberty) - 3D buildings, city street grid, landmarks & ward boundaries
+  return 'https://tiles.openfreemap.org/styles/liberty';
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -226,20 +223,25 @@ export const MapView: React.FC<MapViewProps> = ({
   const clickedMarkerRef = useRef<MapLibreMarker | null>(null);
   const activePopupRef = useRef<MapLibrePopup | null>(null);
 
-  // High reliability Vector & Open GIS tile layer state
-  const [currentLayer, setCurrentLayer] = useState<MapTileLayer>(isDarkMode ? 'dark' : 'osm');
+  // High reliability Vector & Open GIS tile layer state (100% Free, zero API key)
+  const [currentLayer, setCurrentLayer] = useState<MapTileLayer>(isDarkMode ? 'dark' : 'liberty');
   const [is3DMode, setIs3DMode] = useState<boolean>(false);
   const [currentBearing, setCurrentBearing] = useState<number>(0);
   const [currentPitch, setCurrentPitch] = useState<number>(0);
 
-  // Synchronize tile layer with dark mode theme
+  // Synchronize tile layer with dark mode theme and sanitize any obsolete/non-civic layers
   useEffect(() => {
-    if (isDarkMode && currentLayer === 'osm') {
+    const validCivicLayers: MapTileLayer[] = ['liberty', 'satellite', 'dark', 'positron'];
+    if (!validCivicLayers.includes(currentLayer)) {
+      setCurrentLayer(isDarkMode ? 'dark' : 'liberty');
+      return;
+    }
+    if (isDarkMode && currentLayer === 'liberty') {
       setCurrentLayer('dark');
     } else if (!isDarkMode && currentLayer === 'dark') {
-      setCurrentLayer('osm');
+      setCurrentLayer('liberty');
     }
-  }, [isDarkMode]);
+  }, [isDarkMode, currentLayer]);
 
   const [showLayerMenu, setShowLayerMenu] = useState(false);
   const [isAudioSummaryPlaying, setIsAudioSummaryPlaying] = useState(false);
@@ -395,41 +397,105 @@ export const MapView: React.FC<MapViewProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isMapFullscreen]);
 
+  const DISPLAY_MAP_LAYERS: MapTileLayer[] = [
+    'liberty',
+    'satellite',
+    'dark',
+    'positron',
+  ];
+
   const tileUrls: Record<
     MapTileLayer,
-    { name: string; tag: string }
+    { name: string; tag: string; group: string; badge?: string }
   > = {
-    osm: {
-      name: 'OpenFreeMap Liberty Vector',
-      tag: '60 FPS GPU-Rendered Vector Map',
-    },
-    voyager: {
-      name: 'OpenFreeMap Liberty',
-      tag: 'Crisp Urban Vector Tiles',
-    },
-    positron: {
-      name: 'Positron Minimal Canvas',
-      tag: 'High-Contrast Neutral Base',
-    },
-    dark: {
-      name: 'OpenFreeMap Dark Vector',
-      tag: 'Night Inspection & Outages',
-    },
-    hot: {
-      name: 'Humanitarian (HOT)',
-      tag: 'Infrastructure Density',
-    },
-    cyclosm: {
-      name: 'CyclOSM Mobility',
-      tag: 'Roads & Cycling Lanes',
-    },
-    topo: {
-      name: 'OpenTopo (Contour)',
-      tag: 'Elevation & Terrain',
+    liberty: {
+      name: 'Civic Street & Ward Map',
+      tag: 'Full 3D buildings, city street grid, municipal wards & landmarks',
+      group: 'Civic Views',
+      badge: 'Default • 3D',
     },
     satellite: {
-      name: 'Satellite Aerial (Esri)',
-      tag: 'World High-Res Imagery',
+      name: 'Satellite Aerial View',
+      tag: 'High-res photography for road damage, dumps & site inspection',
+      group: 'Civic Views',
+      badge: 'Aerial Imagery',
+    },
+    dark: {
+      name: 'Night & Outages Mode',
+      tag: 'High-contrast dark vector for streetlights & night hazards',
+      group: 'Civic Views',
+      badge: 'Night Outages',
+    },
+    positron: {
+      name: 'Clean Focus Canvas',
+      tag: 'Minimal grayscale map for clear marker & heatmap focus',
+      group: 'Civic Views',
+      badge: 'Marker Focus',
+    },
+    bright: {
+      name: 'Civic Street (Alias)',
+      tag: 'Redirects to 3D Street Map',
+      group: 'Legacy',
+    },
+    osm: {
+      name: 'Civic Street (Alias)',
+      tag: 'Redirects to 3D Street Map',
+      group: 'Legacy',
+    },
+    esri_streets: {
+      name: 'Civic Street (Alias)',
+      tag: 'Redirects to 3D Street Map',
+      group: 'Legacy',
+    },
+    esri_canvas: {
+      name: 'Clean Focus (Alias)',
+      tag: 'Redirects to Clean Focus',
+      group: 'Legacy',
+    },
+    esri_topo: {
+      name: 'Civic Street (Alias)',
+      tag: 'Redirects to 3D Street Map',
+      group: 'Legacy',
+    },
+    natgeo: {
+      name: 'Civic Street (Alias)',
+      tag: 'Redirects to 3D Street Map',
+      group: 'Legacy',
+    },
+    esri_relief: {
+      name: 'Civic Street (Alias)',
+      tag: 'Redirects to 3D Street Map',
+      group: 'Legacy',
+    },
+    voyager: {
+      name: 'Civic Street (Alias)',
+      tag: 'Redirects to 3D Street Map',
+      group: 'Legacy',
+    },
+    cyclosm: {
+      name: 'Civic Street (Alias)',
+      tag: 'Redirects to 3D Street Map',
+      group: 'Legacy',
+    },
+    hot: {
+      name: 'Civic Street (Alias)',
+      tag: 'Redirects to 3D Street Map',
+      group: 'Legacy',
+    },
+    carto_voyager: {
+      name: 'Civic Street (Alias)',
+      tag: 'Redirects to 3D Street Map',
+      group: 'Legacy',
+    },
+    carto_dark: {
+      name: 'Night Mode (Alias)',
+      tag: 'Redirects to Night Mode',
+      group: 'Legacy',
+    },
+    topo: {
+      name: 'Civic Street (Alias)',
+      tag: 'Redirects to 3D Street Map',
+      group: 'Legacy',
     },
   };
 
@@ -1022,7 +1088,7 @@ export const MapView: React.FC<MapViewProps> = ({
       };
 
       if (map.getSource(sourceId)) {
-        (map.getSource(sourceId) as maplibregl.GeoJSONSource).setData(geojson);
+        (map.getSource(sourceId) as any)?.setData(geojson);
       } else {
         map.addSource(sourceId, {
           type: 'geojson',
@@ -1111,7 +1177,7 @@ export const MapView: React.FC<MapViewProps> = ({
       };
 
       if (map.getSource(trafficSourceId)) {
-        (map.getSource(trafficSourceId) as maplibregl.GeoJSONSource).setData(geojson);
+        (map.getSource(trafficSourceId) as any)?.setData(geojson);
       } else {
         map.addSource(trafficSourceId, { type: 'geojson', data: geojson });
         map.addLayer({
@@ -1150,7 +1216,7 @@ export const MapView: React.FC<MapViewProps> = ({
       const geojson = { type: 'FeatureCollection' as const, features };
 
       if (map.getSource(wardSourceId)) {
-        (map.getSource(wardSourceId) as maplibregl.GeoJSONSource).setData(geojson);
+        (map.getSource(wardSourceId) as any)?.setData(geojson);
       } else {
         map.addSource(wardSourceId, { type: 'geojson', data: geojson });
         map.addLayer({
@@ -1263,8 +1329,9 @@ export const MapView: React.FC<MapViewProps> = ({
       <div ref={mapContainerRef} className="w-full h-full" />
 
       {/* Top Left Floating Notice & Overlay Controls */}
-      <div className="absolute top-3 left-3 z-10 flex flex-col gap-2 pointer-events-auto">
+      <div className="absolute top-3 left-3 z-20 flex flex-wrap items-center gap-2 pointer-events-auto max-w-[calc(100%-70px)]">
         <MapLayerControlPanel
+          className="relative z-30 flex flex-col items-start"
           visibility={layerVisibility}
           onToggleLayer={handleToggleOverlay}
           onSetAllLayers={handleSetAllLayers}
@@ -1284,14 +1351,14 @@ export const MapView: React.FC<MapViewProps> = ({
         {/* 3D Oblique Vector Perspective Button */}
         <button
           onClick={toggle3DMode}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow-md backdrop-blur-md transition-all ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow-md backdrop-blur-md transition-all cursor-pointer whitespace-nowrap shrink-0 ${
             is3DMode
-              ? 'bg-blue-600 text-white shadow-blue-500/30'
-              : 'bg-white/95 dark:bg-slate-900/95 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-slate-700 hover:bg-gray-100'
+              ? 'bg-blue-600 text-white shadow-blue-500/30 ring-2 ring-blue-400/40'
+              : 'bg-white/95 dark:bg-slate-900/95 text-gray-800 dark:text-gray-200 border border-[#c2c6d7] dark:border-slate-700 hover:bg-[#EDF4FF] dark:hover:bg-slate-800'
           }`}
           title="Toggle 3D Extruded Buildings & Pitch View"
         >
-          <Box className="w-3.5 h-3.5" />
+          <Box className={`w-3.5 h-3.5 shrink-0 ${is3DMode ? 'text-white' : 'text-blue-600 dark:text-blue-400'}`} />
           <span>{is3DMode ? '3D Active (55°)' : '3D Vector View'}</span>
         </button>
 
@@ -1299,10 +1366,10 @@ export const MapView: React.FC<MapViewProps> = ({
         {currentBearing !== 0 && (
           <button
             onClick={resetBearing}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold bg-white/95 dark:bg-slate-900/95 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-slate-700 shadow-md backdrop-blur-md"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-white/95 dark:bg-slate-900/95 text-gray-800 dark:text-gray-200 border border-[#c2c6d7] dark:border-slate-700 shadow-md backdrop-blur-md hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer whitespace-nowrap shrink-0"
             title="Reset North Heading"
           >
-            <Compass className="w-3.5 h-3.5 text-blue-600" style={{ transform: `rotate(${-currentBearing}deg)` }} />
+            <Compass className="w-3.5 h-3.5 text-blue-600 shrink-0" style={{ transform: `rotate(${-currentBearing}deg)` }} />
             <span>Reset North ({currentBearing}°)</span>
           </button>
         )}
@@ -1321,30 +1388,58 @@ export const MapView: React.FC<MapViewProps> = ({
           </button>
 
           {showLayerMenu && (
-            <div className="absolute right-0 top-12 w-64 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-700 p-2 z-50 text-xs">
-              <div className="font-bold text-gray-900 dark:text-white px-2 py-1 mb-1 border-b border-gray-100 dark:border-slate-800">
-                Vector & Tile Styles
+            <div className="absolute right-0 top-12 w-80 max-h-[75vh] overflow-y-auto bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-700 p-2.5 z-50 text-xs">
+              <div className="flex items-center justify-between px-2 py-1.5 mb-2 border-b border-gray-100 dark:border-slate-800">
+                <span className="font-bold text-gray-900 dark:text-white">Civic Basemaps</span>
+                <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200/50 dark:border-emerald-800/50">
+                  Zero API Key
+                </span>
               </div>
-              {(Object.keys(tileUrls) as MapTileLayer[]).map((key) => (
-                <button
-                  key={key}
-                  onClick={() => {
-                    soundFX.playClick();
-                    setCurrentLayer(key);
-                    setShowLayerMenu(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-2 rounded-xl flex flex-col transition-colors ${
-                    currentLayer === key
-                      ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-bold'
-                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <span>{tileUrls[key].name}</span>
-                  <span className="text-[10px] text-gray-500 dark:text-gray-400 font-normal">
-                    {tileUrls[key].tag}
-                  </span>
-                </button>
-              ))}
+              <div className="space-y-1.5">
+                {DISPLAY_MAP_LAYERS.map((key) => {
+                  const isSelected = currentLayer === key || (key === 'liberty' && currentLayer === 'voyager');
+                  const info = tileUrls[key];
+                  if (!info) return null;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        soundFX.playClick();
+                        setCurrentLayer(key);
+                        setShowLayerMenu(false);
+                      }}
+                      className={`w-full text-left px-3 py-2.5 rounded-xl flex flex-col transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-bold ring-1 ring-blue-500/25 shadow-xs'
+                          : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100/80 dark:hover:bg-slate-800/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="truncate text-xs font-semibold">{info.name}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {info.badge && (
+                            <span
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                                isSelected
+                                  ? 'bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300'
+                                  : 'bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-gray-400'
+                              }`}
+                            >
+                              {info.badge}
+                            </span>
+                          )}
+                          {isSelected && (
+                            <span className="w-2 h-2 rounded-full bg-blue-600 dark:bg-blue-400 shrink-0" />
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-[10.5px] text-gray-500 dark:text-gray-400 font-normal line-clamp-1 mt-0.5">
+                        {info.tag}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

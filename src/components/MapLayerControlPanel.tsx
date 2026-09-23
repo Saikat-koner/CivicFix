@@ -166,7 +166,7 @@ export const MapLayerControlPanel: React.FC<MapLayerControlPanelProps> = ({
   }, [isExpanded, updatePanelPosition]);
 
   return (
-    <div className={className || "absolute top-3 right-14 z-30 flex flex-col items-end pointer-events-none"}>
+    <div className={className || "relative z-30 flex flex-col items-start"}>
       {/* Floating Toggle Button */}
       <button
         ref={buttonRef}
@@ -176,7 +176,7 @@ export const MapLayerControlPanel: React.FC<MapLayerControlPanelProps> = ({
           soundFX.playClick();
           setIsExpanded(!isExpanded);
         }}
-        className={buttonClassName || `pointer-events-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl shadow-sm backdrop-blur-md border transition-all duration-200 cursor-pointer ${
+        className={buttonClassName || `pointer-events-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl shadow-sm backdrop-blur-md border transition-all duration-200 cursor-pointer whitespace-nowrap ${
           isExpanded
             ? 'bg-[#0050c8] text-white border-[#0050c8] shadow-[#0050c8]/25 ring-2 ring-[#0050c8]/30'
             : isDarkMode
@@ -185,7 +185,7 @@ export const MapLayerControlPanel: React.FC<MapLayerControlPanelProps> = ({
         }`}
         title="Toggle Map Layers Control Panel"
       >
-        <div className="relative">
+        <div className="relative shrink-0">
           <Layers className="w-3.5 h-3.5 text-emerald-500 animate-pulse" />
           {activeLayersCount > 0 && (
             <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-emerald-500 ring-1 ring-white" />
@@ -202,9 +202,9 @@ export const MapLayerControlPanel: React.FC<MapLayerControlPanelProps> = ({
           {activeLayersCount}/{totalLayersCount}
         </span>
         {isExpanded ? (
-          <ChevronUp className="w-3 h-3 opacity-80" />
+          <ChevronUp className="w-3 h-3 opacity-80 shrink-0" />
         ) : (
-          <ChevronDown className="w-3 h-3 opacity-80" />
+          <ChevronDown className="w-3 h-3 opacity-80 shrink-0" />
         )}
       </button>
 
