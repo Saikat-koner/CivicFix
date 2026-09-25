@@ -548,6 +548,82 @@ export function authenticateUser(
 }
 
 /**
+ * Authenticate or auto-sign-in user via verified OTP
+ */
+export function authenticateWithOtp(
+  identifier: string,
+  targetRole?: UserRole
+): { success: boolean; error?: string; session?: UserSessionData; userCreated?: boolean } {
+  try {
+    const user = findUserByContact(identifier);
+    if (user) {
+      if (targetRole && targetRole === 'admin' && user.role !== 'admin') {
+        return { success: false, error: 'This account does not have City Official / Admin privileges.' };
+      }
+      const contributor: Contributor = {
+        id: user.id,
+        permanentUserId: user.permanentUserId || user.id,
+        rank: 5,
+        name: user.name,
+        avatar: user.avatar,
+        issuesResolved: user.issuesResolved,
+        civicCredits: user.civicCredits,
+        isCurrentUser: true,
+        badges: user.badges,
+        email: user.email,
+        phone: user.phone,
+        emailVerified: true,
+        phoneVerified: true,
+        contactVerified: true,
+        firstReportSubmitted: user.firstReportSubmitted ?? (user.issuesResolved > 0),
+      };
+
+      const session: UserSessionData = {
+        user: contributor,
+        role: user.role,
+        email: user.email,
+        district: user.district,
+        phone: user.phone,
+        emailVerified: true,
+        phoneVerified: true,
+        contactVerified: true,
+        firstReportSubmitted: user.firstReportSubmitted ?? (user.issuesResolved > 0),
+      };
+
+      saveCurrentSession(session);
+      return { success: true, session };
+    }
+
+    // If user does not exist yet, create a verified resident account
+    const cleanId = identifier.trim();
+    const isEmail = cleanId.includes('@');
+    const email = isEmail ? cleanId.toLowerCase() : `citizen.${Date.now().toString(36)}@civicfix.gov.in`;
+    const phone = !isEmail ? cleanId : '';
+    const name = isEmail ? cleanId.split('@')[0] : 'Resident ' + cleanId.slice(-4);
+
+    const regRes = registerNewUser({
+      name,
+      email,
+      password: 'otp_' + Math.random().toString(36).slice(2, 8),
+      pin: '123456',
+      phone,
+      role: 'citizen',
+      emailVerified: isEmail,
+      phoneVerified: !isEmail,
+      authProvider: 'otp_direct',
+    });
+
+    if (regRes.success && regRes.session) {
+      return { success: true, session: regRes.session, userCreated: true };
+    }
+
+    return { success: false, error: regRes.error || 'Failed to authenticate via OTP.' };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'OTP authentication error.' };
+  }
+}
+
+/**
  * Find user account by registered email, username, or phone number
  */
 export function findUserByContact(identifier: string): RegisteredUserAccount | null {

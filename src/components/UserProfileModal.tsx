@@ -39,7 +39,7 @@ interface UserProfileModalProps {
   district?: string;
   isLoggedIn?: boolean;
   onClose: () => void;
-  onOpenAuthModal: (mode?: 'login' | 'register') => void;
+  onOpenAuthModal: (mode?: 'login' | 'register' | 'forgot') => void;
   onSignOut: () => void;
   defaultView?: 'desktop' | 'mobile';
   onUpdateAvatar?: (newAvatar: string) => void;
@@ -598,7 +598,20 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               </div>
 
               {/* Bottom Quick Switcher */}
-              <div className="pt-1 flex items-center justify-end text-xs">
+              <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenAuthModal('forgot');
+                  }}
+                  className="text-amber-800 font-extrabold hover:underline flex items-center gap-1 cursor-pointer bg-amber-50 hover:bg-amber-100 px-2.5 py-1.5 rounded-xl border border-amber-200 transition-colors shadow-2xs"
+                  title="Reset your account password"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Forgot / Reset Password</span>
+                </button>
+
                 {isLoggedIn && (
                   <button
                     type="button"
@@ -606,7 +619,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                       onSignOut();
                       onClose();
                     }}
-                    className="text-red-600 font-bold hover:underline"
+                    className="text-red-600 font-bold hover:underline cursor-pointer"
                   >
                     Sign Out
                   </button>

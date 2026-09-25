@@ -39,6 +39,7 @@ import confetti from 'canvas-confetti';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import {
   authenticateUser,
+  authenticateWithOtp,
   registerNewUser,
   checkDuplicateCitizenAccount,
   resetUserPassword,
@@ -144,6 +145,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return 'password';
     }
   });
+
+  // Track whether active OTP flow is for Login or for Registration
+  const [otpFlow, setOtpFlow] = useState<'register' | 'login'>('login');
+
+  // Track citizen chosen registration method: OTP, Password, or PIN
+  const [regMethod, setRegMethod] = useState<'otp' | 'password' | 'pin'>('otp');
+
+  // Sync mode whenever modal opens or initialMode prop changes
+  useEffect(() => {
+    if (isOpen) {
+      setAuthMode(initialMode);
+      setErrorMessage(null);
+      setSuccessToast(null);
+      if (initialMode === 'register') {
+        setOtpFlow('register');
+      } else if (initialMode === 'login') {
+        setOtpFlow('login');
+      }
+    }
+  }, [isOpen, initialMode]);
   const [loginEmail, setLoginEmail] = useState(() => {
     try {
       return localStorage.getItem('civic_remembered_identity') || '';
@@ -380,6 +401,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const passwordScore = getPasswordStrength(regPassword);
 
+  // Open Forgot Password helper that pre-fills user's email or mobile
+  const handleOpenForgotPassword = (channel?: 'email' | 'phone') => {
+    setAuthMode('forgot');
+    setForgotStep(1);
+    setErrorMessage(null);
+    setSuccessToast(null);
+    const identifier = (loginEmail || rememberedIdentity || '').trim();
+    if (identifier) {
+      if (identifier.includes('@')) {
+        setForgotEmail(identifier);
+        setForgotChannel(channel || 'email');
+      } else {
+        setForgotPhone(identifier);
+        setForgotChannel(channel || 'phone');
+      }
+    } else if (channel) {
+      setForgotChannel(channel);
+    }
+    soundFX.playClick();
+  };
+
   // Handle Google Sign-In with Supabase
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
@@ -453,18 +495,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
 
     if (loginMethod === 'otp_magic') {
+      const cleanTarget = (loginEmail.trim() || loginPhone.trim() || rememberedIdentity.trim());
+      if (!cleanTarget) {
+        setIsLoading(false);
+        setErrorMessage('Please enter your registered email address or mobile number to receive the OTP.');
+        soundFX.playAlert();
+        return;
+      }
+
+      const isEmail = cleanTarget.includes('@');
+      const targetPhone = !isEmail ? cleanTarget : (loginPhone.trim() || '+91 9213472684');
+      const targetEmail = isEmail ? cleanTarget.toLowerCase() : (loginEmail.trim() || 'saikatkoner4@gmail.com');
+
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       setGeneratedOtp(code);
-      const targetPhone = loginPhone.trim() || '+91 9213472684';
-      const targetEmail = loginEmail.trim() || 'saikatkoner4@gmail.com';
       setOtpTargetPhone(targetPhone);
       setOtpTargetEmail(targetEmail);
-      setOtpTargetContact(targetPhone);
+      setOtpTargetContact(cleanTarget);
+      setOtpFlow('login');
 
       apiClient.sendDualOtp({
         email: targetEmail,
         phone: targetPhone,
-        citizenName: 'Registered Citizen',
+        citizenName: 'Registered Resident',
         otpCode: code,
         purpose: 'login',
       }).then((res) => {
@@ -610,6 +663,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     // 1. Mandatory fields
+    if (!regFullName.trim()) {
+      setErrorMessage('Please provide your full name.');
+      soundFX.playAlert();
+      return;
+    }
     if (!regEmail.trim()) {
       setErrorMessage('Please provide a valid email address.');
       soundFX.playAlert();
@@ -630,28 +688,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    if (regPassword !== regConfirmPassword) {
-      setErrorMessage('Passwords do not match.');
-      soundFX.playAlert();
-      return;
+    // 3. Method-specific credential validation (OTP, Password, or PIN)
+    if (regMethod === 'password') {
+      if (regPassword.length < 6) {
+        setErrorMessage('Password must be at least 6 characters.');
+        soundFX.playAlert();
+        return;
+      }
+      if (regPassword !== regConfirmPassword) {
+        setErrorMessage('Passwords do not match.');
+        soundFX.playAlert();
+        return;
+      }
+    } else if (regMethod === 'pin') {
+      if (!/^\d{4,6}$/.test(regPin.trim())) {
+        setErrorMessage('Please set up a 4 to 6-digit numeric login PIN (numbers only).');
+        soundFX.playAlert();
+        return;
+      }
+      if (regPin.trim() !== regConfirmPin.trim()) {
+        setErrorMessage('Your PIN and confirmation PIN do not match.');
+        soundFX.playAlert();
+        return;
+      }
     }
-    if (regPassword.length < 6) {
-      setErrorMessage('Password must be at least 6 characters.');
-      soundFX.playAlert();
-      return;
-    }
-
-    // 3. Strict 6-digit PIN validation
-    if (!/^\d{6}$/.test(regPin.trim())) {
-      setErrorMessage('Please set up a 6-digit numeric login PIN (numbers only).');
-      soundFX.playAlert();
-      return;
-    }
-    if (regPin.trim() !== regConfirmPin.trim()) {
-      setErrorMessage('Your 6-digit PIN and confirmation PIN do not match.');
-      soundFX.playAlert();
-      return;
-    }
+    // If regMethod === 'otp', no password or pin is required upfront
 
     if (!regCitizenPledge) {
       setErrorMessage('You must accept the Civic Charter terms to register.');
@@ -694,6 +755,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setOtpTargetEmail(targetEmail);
     setOtpTargetPhone(targetPhone);
     setOtpTargetContact(targetPhone);
+    setOtpFlow('register');
 
     // 4. Dispatch Dual Real-Time OTP simultaneously to Email AND Mobile via Free Third-Party Communications API
     try {
@@ -1185,19 +1247,65 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       console.warn('[Verify OTP Note]', err);
     }
 
-    // Register user with strict one-person one-registration check & 6-digit PIN
+    // 1. If this was an OTP Login, authenticate directly and establish session
+    if (otpFlow === 'login') {
+      const targetId = otpTargetContact || otpTargetEmail || otpTargetPhone || loginEmail || loginPhone || 'saikatkoner4@gmail.com';
+      const authRes = authenticateWithOtp(targetId, selectedRole);
+
+      if (!authRes.success || !authRes.session) {
+        setIsLoading(false);
+        setErrorMessage(authRes.error || 'No registered account found for this contact. Please create a new resident account.');
+        soundFX.playAlert();
+        return;
+      }
+
+      // Store remembered identity for instant PIN or OTP login next time
+      try {
+        localStorage.setItem('civic_remembered_identity', targetId);
+        if (authRes.session.user?.name) {
+          localStorage.setItem('civic_remembered_name', authRes.session.user.name);
+        }
+      } catch {}
+
+      markSmsVerified(otpTargetPhone || loginPhone, otpTargetEmail || loginEmail);
+
+      setIsLoading(false);
+      soundFX.playSuccess();
+      confetti({ particleCount: 70, spread: 60 });
+      setSuccessToast(`Signed in successfully as ${authRes.session.user.name}!`);
+      onAuthSuccess(authRes.session);
+      onClose();
+      return;
+    }
+
+    // 2. If this was Registration, mint permanent citizen profile with user's selected credential method
+    const userPassword =
+      regMethod === 'password' && regPassword
+        ? regPassword
+        : 'civic_' + Math.random().toString(36).slice(2, 10);
+
+    const userPin =
+      regMethod === 'pin' && regPin
+        ? regPin
+        : regPin || (regPhone ? regPhone.replace(/\D/g, '').slice(-6) : '') || '123456';
+
     const res = registerNewUser({
       name: regFullName || 'Verified Resident',
       email: regEmail || loginEmail || 'saikatkoner4@gmail.com',
-      password: regPassword || 'civic123',
-      pin: regPin || '123456',
+      password: userPassword,
+      pin: userPin,
       phone: regPhone || loginPhone || '+91 9213472684',
       district: regDistrict,
       role: 'citizen', // Municipal policy: Public registration produces verified Citizen IDs only. Admin IDs must be provisioned by an existing admin.
       avatar: regAvatar,
       emailVerified: true,
       phoneVerified: true,
-      authProvider: 'email_phone_dual_otp',
+      authProvider:
+        regMethod === 'otp'
+          ? 'otp_only'
+          : regMethod === 'pin'
+          ? 'pin_registration'
+          : 'password_registration',
     });
 
     if (!res.success) {
@@ -1265,7 +1373,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {authMode === 'register_success' ? (
               <Sparkles className="w-6 h-6 text-amber-300" />
             ) : authMode === 'verify_otp' ? (
-              <ShieldCheck className="w-6 h-6" />
+              otpFlow === 'login' ? <Zap className="w-6 h-6 text-amber-300" /> : <ShieldCheck className="w-6 h-6" />
             ) : authMode === 'forgot' ? (
               <KeyRound className="w-6 h-6 text-amber-300" />
             ) : (
@@ -1276,7 +1384,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <span className="text-[10px] font-black text-[#0050c8] uppercase tracking-wider block">
             {authMode === 'login' && 'Verified Civic Authentication'}
             {authMode === 'register' && 'Resident Registration & Digital Badge'}
-            {authMode === 'verify_otp' && 'Identity & Resident Verification'}
+            {authMode === 'verify_otp' && (otpFlow === 'login' ? 'Instant OTP Sign In' : 'Identity & Resident Verification')}
             {authMode === 'forgot' && 'Account Security & Password Recovery'}
             {authMode === 'register_success' && 'Official Civic Identity Generated'}
           </span>
@@ -1284,7 +1392,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <h2 className="text-2xl font-black text-[#121c28] tracking-tight">
             {authMode === 'login' && (selectedRole === 'admin' ? 'City Official Command Login' : 'Citizen Sign In')}
             {authMode === 'register' && 'Register Civic Identity'}
-            {authMode === 'verify_otp' && 'Verify 6-Digit Citizen Code'}
+            {authMode === 'verify_otp' && (otpFlow === 'login' ? 'Sign In via 6-Digit OTP' : 'Verify 6-Digit Citizen Code')}
             {authMode === 'forgot' && (forgotStep === 1 ? 'Reset Account Password' : 'Enter 6-Digit Reset Code')}
             {authMode === 'register_success' && 'Registration Complete!'}
           </h2>
@@ -1295,9 +1403,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           ) : (
             <p className="text-xs text-[#56596e]">
-              {authMode === 'login' && 'Sign in to access reporting, civic verifications, upvoting, and community redressal.'}
+              {authMode === 'login' && (
+                <span>
+                  Sign in to access reporting, civic verifications, and community redressal.{' '}
+                  <button
+                    type="button"
+                    onClick={() => handleOpenForgotPassword()}
+                    className="text-[#0050c8] font-bold hover:underline cursor-pointer inline-flex items-center gap-0.5 ml-1"
+                  >
+                    Forgot password?
+                  </button>
+                </span>
+              )}
               {authMode === 'register' && 'Create your verified citizen profile to report infrastructure hazards and earn Civic Credits.'}
-              {authMode === 'verify_otp' && 'Enter the time-sensitive multi-factor code dispatched to confirm resident status.'}
+              {authMode === 'verify_otp' && (otpFlow === 'login'
+                ? 'Enter the 6-digit one-time code sent to your phone/email to sign in without remembering a password.'
+                : 'Enter the time-sensitive multi-factor code dispatched to confirm resident status.'
+              )}
               {authMode === 'forgot' && (forgotStep === 1
                 ? 'We will generate a temporary 6-digit security reset code and send it to your registered email or phone.'
                 : 'Enter the 6-digit reset code received on your contact to choose a new password.'
@@ -1421,10 +1543,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </label>
                     <button
                       type="button"
-                      onClick={() => setIsQuickPinMode(false)}
-                      className="text-xs font-bold text-[#0050c8] hover:underline cursor-pointer"
+                      onClick={() => handleOpenForgotPassword()}
+                      className="text-xs font-bold text-[#0050c8] hover:text-[#003da1] hover:underline cursor-pointer flex items-center gap-1"
                     >
-                      Use Password or Code Instead
+                      <KeyRound className="w-3.5 h-3.5" />
+                      <span>Forgot PIN or Password?</span>
                     </button>
                   </div>
                   <div className="relative">
@@ -1452,45 +1575,77 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       {showLoginPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    Sign in with your saved PIN on this device.
-                  </p>
+                  <div className="flex items-center justify-between text-xs mt-2 px-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsQuickPinMode(false)}
+                      className="text-[11px] text-gray-600 hover:text-[#0050c8] font-bold hover:underline cursor-pointer"
+                    >
+                      Use Password or OTP Instead
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenForgotPassword()}
+                      className="text-[11px] font-bold text-[#0050c8] hover:text-[#003da1] hover:underline cursor-pointer flex items-center gap-1"
+                    >
+                      <KeyRound className="w-3 h-3 text-[#0050c8]" />
+                      <span>Forgot password?</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
               <>
-                {/* Tri-Auth Switcher: PIN vs Password vs Code on Email/Number */}
+                {/* Tri-Auth Switcher: Password vs PIN vs OTP */}
                 {selectedRole === 'citizen' && (
-                  <div className="flex bg-[#f8f9ff] p-0.5 rounded-xl border border-gray-200 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setLoginMethod('pin')}
-                      className={`flex-1 py-1.5 rounded-lg font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
-                        loginMethod === 'pin' ? 'bg-white text-[#0050c8] shadow-xs' : 'text-gray-600'
-                      }`}
-                    >
-                      <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>PIN Login</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLoginMethod('password')}
-                      className={`flex-1 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                        loginMethod === 'password' ? 'bg-white text-[#0050c8] shadow-xs' : 'text-gray-600'
-                      }`}
-                    >
-                      Password
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLoginMethod('otp_magic')}
-                      className={`flex-1 py-1.5 rounded-lg font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
-                        loginMethod === 'otp_magic' ? 'bg-white text-[#0050c8] shadow-xs' : 'text-gray-600'
-                      }`}
-                    >
-                      <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Code on Email/No.</span>
-                    </button>
+                  <div className="space-y-1">
+                    <div className="flex bg-[#f8f9ff] p-1 rounded-2xl border border-gray-200 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLoginMethod('password');
+                          setErrorMessage(null);
+                        }}
+                        className={`flex-1 py-2 rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                          loginMethod === 'password'
+                            ? 'bg-[#0050c8] text-white shadow-xs'
+                            : 'text-gray-600 hover:text-[#0050c8]'
+                        }`}
+                      >
+                        <Lock className={`w-3.5 h-3.5 ${loginMethod === 'password' ? 'text-white' : 'text-blue-600'}`} />
+                        <span>Password</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLoginMethod('pin');
+                          setErrorMessage(null);
+                        }}
+                        className={`flex-1 py-2 rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                          loginMethod === 'pin'
+                            ? 'bg-[#0050c8] text-white shadow-xs'
+                            : 'text-gray-600 hover:text-[#0050c8]'
+                        }`}
+                      >
+                        <KeyRound className={`w-3.5 h-3.5 ${loginMethod === 'pin' ? 'text-white' : 'text-indigo-600'}`} />
+                        <span>Security PIN</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLoginMethod('otp_magic');
+                          setErrorMessage(null);
+                        }}
+                        className={`flex-1 py-2 rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                          loginMethod === 'otp_magic'
+                            ? 'bg-[#0050c8] text-white shadow-xs'
+                            : 'text-gray-600 hover:text-[#0050c8]'
+                        }`}
+                      >
+                        <Zap className={`w-3.5 h-3.5 ${loginMethod === 'otp_magic' ? 'text-amber-300' : 'text-amber-500'}`} />
+                        <span>Through OTP</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -1520,23 +1675,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         </label>
                         <button
                           type="button"
-                          onClick={() => {
-                            setAuthMode('forgot');
-                            setErrorMessage(null);
-                            setSuccessToast(null);
-                            if (loginEmail) {
-                              if (loginEmail.includes('@')) {
-                                setForgotEmail(loginEmail);
-                                setForgotChannel('email');
-                              } else {
-                                setForgotPhone(loginEmail);
-                                setForgotChannel('phone');
-                              }
-                            }
-                          }}
-                          className="text-xs font-bold text-[#0050c8] hover:underline cursor-pointer"
+                          onClick={() => handleOpenForgotPassword()}
+                          className="text-xs font-semibold text-[#0050c8] hover:text-[#003da1] hover:underline cursor-pointer flex items-center gap-1 transition-colors"
                         >
-                          Forgot PIN?
+                          <KeyRound className="w-3.5 h-3.5 text-[#0050c8]" />
+                          <span>Forgot PIN?</span>
                         </button>
                       </div>
                       <div className="relative">
@@ -1563,9 +1706,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           {showLoginPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
-                      <p className="text-[11px] text-gray-500 mt-1">
-                        Sign in instantly using your personalized PIN.
-                      </p>
+                      <div className="flex items-center justify-between text-xs mt-2 px-0.5">
+                        <label className="flex items-center gap-2 cursor-pointer select-none text-[#56596e]">
+                          <input
+                            type="checkbox"
+                            checked={rememberMe}
+                            onChange={(e) => setRememberMe(e.target.checked)}
+                            className="w-4 h-4 rounded border-[#c2c6d7] text-[#0050c8] focus:ring-[#1d68f2] cursor-pointer"
+                          />
+                          <span className="font-medium text-[11px]">Remember me</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenForgotPassword()}
+                          className="text-xs font-bold text-[#0050c8] hover:text-[#003da1] hover:underline cursor-pointer"
+                        >
+                          Forgot PIN or Password?
+                        </button>
+                      </div>
                     </div>
                   </>
                 ) : loginMethod === 'password' ? (
@@ -1594,23 +1752,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         </label>
                         <button
                           type="button"
-                          onClick={() => {
-                            setAuthMode('forgot');
-                            setErrorMessage(null);
-                            setSuccessToast(null);
-                            if (loginEmail) {
-                              if (loginEmail.includes('@')) {
-                                setForgotEmail(loginEmail);
-                                setForgotChannel('email');
-                              } else {
-                                setForgotPhone(loginEmail);
-                                setForgotChannel('phone');
-                              }
-                            }
-                          }}
-                          className="text-xs font-bold text-[#0050c8] hover:underline cursor-pointer"
+                          onClick={() => handleOpenForgotPassword('email')}
+                          className="text-xs font-semibold text-[#0050c8] hover:text-[#003da1] hover:underline cursor-pointer flex items-center gap-1 transition-colors"
                         >
-                          Forgot Password?
+                          <KeyRound className="w-3.5 h-3.5 text-[#0050c8]" />
+                          <span>Forgot Password?</span>
                         </button>
                       </div>
                       <div className="relative">
@@ -1631,10 +1777,36 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
+                      {/* Classic Website "Remember me" and "Forgot password?" row */}
+                      <div className="flex items-center justify-between text-xs mt-2 px-0.5">
+                        <label className="flex items-center gap-2 cursor-pointer select-none text-[#56596e] hover:text-[#121c28] transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={rememberMe}
+                            onChange={(e) => setRememberMe(e.target.checked)}
+                            className="w-4 h-4 rounded border-[#c2c6d7] text-[#0050c8] focus:ring-[#1d68f2] cursor-pointer"
+                          />
+                          <span className="font-medium text-[11px]">Remember me</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenForgotPassword('email')}
+                          className="text-xs font-bold text-[#0050c8] hover:text-[#003da1] hover:underline cursor-pointer flex items-center gap-1"
+                        >
+                          <span>Forgot password?</span>
+                        </button>
+                      </div>
                     </div>
                   </>
                 ) : (
                   <div className="space-y-3">
+                    <div className="p-3 bg-emerald-50/80 border border-emerald-200/70 rounded-2xl flex items-start gap-2.5 text-xs text-emerald-950">
+                      <Zap className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-extrabold block">One-Time Password (OTP) Sign In</span>
+                        Enter your registered email address or mobile number. We will send a 6-digit real-time code to sign in directly without a password.
+                      </div>
+                    </div>
                     <div>
                       <label className="block text-[11px] font-extrabold text-[#121c28] uppercase tracking-wider mb-1.5 flex items-center justify-between">
                         <span>Send Code to Email or Mobile</span>
@@ -1659,9 +1831,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           defaultCountryCode="IN"
                         />
                       </div>
-                      <p className="text-[11px] text-gray-500 mt-1.5">
-                        We will send a 6-digit one-time code to your email or registered phone.
-                      </p>
+                      <div className="flex items-center justify-between text-xs mt-2 px-0.5">
+                        <span className="text-[11px] text-gray-500">Need to reset your password?</span>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenForgotPassword()}
+                          className="text-xs font-bold text-[#0050c8] hover:text-[#003da1] hover:underline cursor-pointer flex items-center gap-1"
+                        >
+                          <KeyRound className="w-3.5 h-3.5" />
+                          <span>Forgot Password?</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1694,49 +1874,51 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <LogIn className="w-4 h-4" />
                   <span>
                     {loginMethod === 'otp_magic'
-                      ? 'Send 6-Digit Code'
+                      ? 'Send 6-Digit OTP Code'
                       : isQuickPinMode || loginMethod === 'pin'
                       ? 'Sign In with PIN'
-                      : 'Sign In & Point Map at My Location'}
+                      : 'Sign In with Password'}
                   </span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
             </button>
 
-            {/* Quick Test Shortcuts & Admin Governance Notice */}
-            <div className="pt-2.5 flex flex-col gap-2.5 border-t border-gray-100 text-xs">
-              <div className="flex items-center justify-between">
+            {/* Standard Website Login Footer: Forgot Password & Sign Up links */}
+            <div className="pt-3 border-t border-gray-100 flex flex-col gap-2.5 text-xs">
+              <div className="flex items-center justify-between bg-blue-50/70 p-2.5 rounded-xl border border-blue-100">
+                <div className="flex items-center gap-1.5 text-gray-700">
+                  <KeyRound className="w-3.5 h-3.5 text-[#0050c8]" />
+                  <span className="font-bold text-[11px]">Forgot your password?</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleOpenForgotPassword()}
+                  className="px-2.5 py-1 bg-white hover:bg-blue-50 text-[#0050c8] border border-blue-200 rounded-lg font-black text-xs hover:underline cursor-pointer transition-colors shadow-2xs"
+                >
+                  Reset Password
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between px-1">
                 <button
                   type="button"
                   onClick={() => {
                     setSelectedRole('citizen');
                     setAuthMode('register');
+                    setErrorMessage(null);
                   }}
-                  className="text-[#0050c8] font-bold hover:underline cursor-pointer"
+                  className="text-[#0050c8] font-bold hover:underline cursor-pointer flex items-center gap-1"
                 >
-                  Create New Citizen Account
+                  <User className="w-3.5 h-3.5" />
+                  <span>Don't have an account? Sign Up</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setAuthMode('forgot');
-                    setErrorMessage(null);
-                    setSuccessToast(null);
-                    if (loginEmail) {
-                      if (loginEmail.includes('@')) {
-                        setForgotEmail(loginEmail);
-                        setForgotChannel('email');
-                      } else {
-                        setForgotPhone(loginEmail);
-                        setForgotChannel('phone');
-                      }
-                    }
-                  }}
-                  className="text-[#56596e] hover:text-[#0050c8] font-bold cursor-pointer flex items-center gap-1"
+                  onClick={() => handleOpenForgotPassword()}
+                  className="text-[#56596e] hover:text-[#0050c8] font-bold hover:underline cursor-pointer"
                 >
-                  <KeyRound className="w-3.5 h-3.5 text-[#0050c8]" />
-                  <span>Forgot Password?</span>
+                  Need password help?
                 </button>
               </div>
 
@@ -2430,6 +2612,83 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               />
             </div>
 
+            {/* Registration Method Choice: OTP vs Password vs PIN */}
+            <div className="space-y-2">
+              <label className="block text-[11px] font-extrabold text-[#121c28] uppercase tracking-wider">
+                Choose How You Want to Register
+              </label>
+              <div className="grid grid-cols-3 bg-[#f8f9ff] p-1 rounded-2xl border border-gray-200 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRegMethod('otp');
+                    setErrorMessage(null);
+                  }}
+                  className={`py-2 px-1 rounded-xl font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer ${
+                    regMethod === 'otp' ? 'bg-[#0050c8] text-white shadow-xs' : 'text-gray-600 hover:text-[#0050c8]'
+                  }`}
+                >
+                  <Zap className={`w-3.5 h-3.5 ${regMethod === 'otp' ? 'text-amber-300' : 'text-amber-500'}`} />
+                  <span>Through OTP</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRegMethod('password');
+                    setErrorMessage(null);
+                  }}
+                  className={`py-2 px-1 rounded-xl font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer ${
+                    regMethod === 'password' ? 'bg-[#0050c8] text-white shadow-xs' : 'text-gray-600 hover:text-[#0050c8]'
+                  }`}
+                >
+                  <Lock className={`w-3.5 h-3.5 ${regMethod === 'password' ? 'text-blue-200' : 'text-blue-600'}`} />
+                  <span>Password</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRegMethod('pin');
+                    setErrorMessage(null);
+                  }}
+                  className={`py-2 px-1 rounded-xl font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 cursor-pointer ${
+                    regMethod === 'pin' ? 'bg-[#0050c8] text-white shadow-xs' : 'text-gray-600 hover:text-[#0050c8]'
+                  }`}
+                >
+                  <KeyRound className={`w-3.5 h-3.5 ${regMethod === 'pin' ? 'text-indigo-200' : 'text-indigo-600'}`} />
+                  <span>Through PIN</span>
+                </button>
+              </div>
+
+              {/* Informative banner for active registration method */}
+              {regMethod === 'otp' && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200/80 rounded-2xl flex items-start gap-2.5 text-xs text-emerald-950">
+                  <Zap className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-extrabold block">Instant Passwordless OTP Registration</span>
+                    No password or PIN required! You will receive a 6-digit real-time verification code on your phone and email to confirm your resident identity.
+                  </div>
+                </div>
+              )}
+              {regMethod === 'password' && (
+                <div className="p-3 bg-blue-50 border border-blue-200/80 rounded-2xl flex items-start gap-2.5 text-xs text-blue-950">
+                  <Lock className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-extrabold block">Standard Password Registration</span>
+                    Create an account password of your choice below, verified through dual real-time SMS and Email OTP.
+                  </div>
+                </div>
+              )}
+              {regMethod === 'pin' && (
+                <div className="p-3 bg-indigo-50 border border-indigo-200/80 rounded-2xl flex items-start gap-2.5 text-xs text-indigo-950">
+                  <KeyRound className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-extrabold block">Quick PIN Registration</span>
+                    Set up an easy 4 to 6-digit numeric PIN for instant single-click sign-in without a complex password.
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] font-extrabold text-[#121c28] uppercase tracking-wider mb-1">
@@ -2640,100 +2899,104 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-extrabold text-[#121c28] uppercase tracking-wider mb-1">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={regPassword}
-                  onChange={(e) => setRegPassword(e.target.value)}
-                  placeholder="Min. 6 chars"
-                  className="w-full px-3 py-2 rounded-xl border border-[#c2c6d7] text-sm focus:outline-none focus:ring-2 focus:ring-[#1d68f2] bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-extrabold text-[#121c28] uppercase tracking-wider mb-1">
-                  Confirm Password
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={regConfirmPassword}
-                  onChange={(e) => setRegConfirmPassword(e.target.value)}
-                  placeholder="Repeat password"
-                  className="w-full px-3 py-2 rounded-xl border border-[#c2c6d7] text-sm focus:outline-none focus:ring-2 focus:ring-[#1d68f2] bg-white"
-                />
-              </div>
-            </div>
-
-            {/* 6-Digit Security PIN Setup for Fast Sign-In */}
-            <div className="p-3.5 bg-gradient-to-br from-indigo-50/80 to-blue-50/70 border border-indigo-200/90 rounded-2xl space-y-2.5">
-              <div className="flex items-center justify-between">
-                <label className="text-[11px] font-black text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Set Up 6-Digit Login PIN</span>
-                </label>
-                <span className="text-[10px] font-black px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full">
-                  Quick Sign-In PIN
-                </span>
-              </div>
-              <p className="text-[11px] text-gray-600 leading-relaxed">
-                Set up a 6-digit numeric PIN to sign in quickly on any mobile or computer without having to type your full password.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-0.5">
+            {/* Method-specific Credential Setup */}
+            {regMethod === 'password' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-in fade-in">
                 <div>
-                  <label className="block text-[10px] font-extrabold text-gray-700 uppercase tracking-wider mb-1">
-                    6-Digit Security PIN
+                  <label className="block text-[11px] font-extrabold text-[#121c28] uppercase tracking-wider mb-1">
+                    Create Password
                   </label>
-                  <div className="relative">
+                  <input
+                    type="password"
+                    required
+                    value={regPassword}
+                    onChange={(e) => setRegPassword(e.target.value)}
+                    placeholder="Min. 6 chars"
+                    className="w-full px-3 py-2 rounded-xl border border-[#c2c6d7] text-sm focus:outline-none focus:ring-2 focus:ring-[#1d68f2] bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-extrabold text-[#121c28] uppercase tracking-wider mb-1">
+                    Confirm Password
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    value={regConfirmPassword}
+                    onChange={(e) => setRegConfirmPassword(e.target.value)}
+                    placeholder="Repeat password"
+                    className="w-full px-3 py-2 rounded-xl border border-[#c2c6d7] text-sm focus:outline-none focus:ring-2 focus:ring-[#1d68f2] bg-white"
+                  />
+                </div>
+              </div>
+            )}
+
+            {regMethod === 'pin' && (
+              <div className="p-3.5 bg-gradient-to-br from-indigo-50/80 to-blue-50/70 border border-indigo-200/90 rounded-2xl space-y-2.5 animate-in fade-in">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-black text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Set Up 4 to 6-Digit Login PIN</span>
+                  </label>
+                  <span className="text-[10px] font-black px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full">
+                    Quick Sign-In PIN
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-600 leading-relaxed">
+                  Set up a 4 to 6-digit numeric PIN to sign in quickly on any mobile or computer without having to type a password.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-0.5">
+                  <div>
+                    <label className="block text-[10px] font-extrabold text-gray-700 uppercase tracking-wider mb-1">
+                      Security PIN (4-6 Digits)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showRegPin ? 'text' : 'password'}
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={6}
+                        required
+                        value={regPin}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                          setRegPin(val);
+                        }}
+                        placeholder="e.g. 582914"
+                        className="w-full pl-3 pr-8 py-2 rounded-xl border border-indigo-200 text-sm font-mono tracking-widest text-indigo-950 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowRegPin(!showRegPin)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                      >
+                        {showRegPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-extrabold text-gray-700 uppercase tracking-wider mb-1">
+                      Confirm PIN
+                    </label>
                     <input
                       type={showRegPin ? 'text' : 'password'}
                       inputMode="numeric"
                       pattern="[0-9]*"
                       maxLength={6}
                       required
-                      value={regPin}
+                      value={regConfirmPin}
                       onChange={(e) => {
                         const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-                        setRegPin(val);
+                        setRegConfirmPin(val);
                       }}
-                      placeholder="e.g. 582914"
-                      className="w-full pl-3 pr-8 py-2 rounded-xl border border-indigo-200 text-sm font-mono tracking-widest text-indigo-950 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                      placeholder="Repeat digits"
+                      className="w-full px-3 py-2 rounded-xl border border-indigo-200 text-sm font-mono tracking-widest text-indigo-950 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                     />
-                    <button
-                      type="button"
-                      onClick={() => setShowRegPin(!showRegPin)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
-                    >
-                      {showRegPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    </button>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-[10px] font-extrabold text-gray-700 uppercase tracking-wider mb-1">
-                    Confirm 6-Digit PIN
-                  </label>
-                  <input
-                    type={showRegPin ? 'text' : 'password'}
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
-                    required
-                    value={regConfirmPin}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-                      setRegConfirmPin(val);
-                    }}
-                    placeholder="Repeat 6 digits"
-                    className="w-full px-3 py-2 rounded-xl border border-indigo-200 text-sm font-mono tracking-widest text-indigo-950 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-                  />
-                </div>
               </div>
-            </div>
+            )}
 
             {/* Terms & Pledge */}
             <div className="p-2.5 rounded-xl bg-[#f8f9ff] border border-[#c2c6d7]/40">
@@ -2802,7 +3065,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 ) : (
                   <>
                     <Zap className="w-4 h-4 text-amber-300" />
-                    <span>Register & Send Dual Real-Time OTP</span>
+                    <span>
+                      {regMethod === 'otp'
+                        ? 'Register Through OTP & Send 6-Digit Code'
+                        : regMethod === 'pin'
+                        ? 'Register with PIN & Send Dual OTP'
+                        : 'Register with Password & Send Dual OTP'}
+                    </span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
@@ -2827,11 +3096,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {/* Status Pending Banner */}
             <div className="bg-[#EDF4FF] p-3.5 rounded-2xl border border-[#dae2ff] text-center space-y-1">
               <div className="inline-flex items-center gap-1.5 text-xs font-black text-[#0050c8]">
-                <CheckCircle2 className="w-4 h-4 text-[#10B981]" />
-                <span>Verified Resident Status Pending</span>
+                {otpFlow === 'login' ? (
+                  <>
+                    <Zap className="w-4 h-4 text-amber-500" />
+                    <span>One-Time Password (OTP) Sign In</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-[#10B981]" />
+                    <span>Verified Resident Status Pending</span>
+                  </>
+                )}
               </div>
               <p className="text-xs text-[#424655]">
-                We sent a 6-digit verification code simultaneously to your registered mobile device (<strong>{otpTargetPhone || regPhone || loginPhone || '+91 9213472684'}</strong>) and email (<strong>{otpTargetEmail || regEmail || loginEmail || 'saikatkoner4@gmail.com'}</strong>).
+                {otpFlow === 'login' ? (
+                  <>
+                    We sent your 6-digit one-time login code simultaneously to your mobile device (<strong>{otpTargetPhone || regPhone || loginPhone || '+91 9213472684'}</strong>) and email (<strong>{otpTargetEmail || regEmail || loginEmail || 'saikatkoner4@gmail.com'}</strong>).
+                  </>
+                ) : (
+                  <>
+                    We sent a 6-digit verification code simultaneously to your registered mobile device (<strong>{otpTargetPhone || regPhone || loginPhone || '+91 9213472684'}</strong>) and email (<strong>{otpTargetEmail || regEmail || loginEmail || 'saikatkoner4@gmail.com'}</strong>).
+                  </>
+                )}
               </p>
             </div>
 
@@ -3011,7 +3297,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               ) : (
                 <>
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Verify Identity & Point Map at My Location</span>
+                  <span>
+                    {otpFlow === 'login'
+                      ? 'Verify Code & Complete Sign In'
+                      : 'Verify Identity & Mint Citizen ID'}
+                  </span>
                 </>
               )}
             </button>
@@ -3019,10 +3309,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="text-center pt-1">
               <button
                 type="button"
-                onClick={() => setAuthMode('login')}
-                className="text-xs text-[#737686] hover:text-[#121c28] font-bold"
+                onClick={() => setAuthMode(otpFlow === 'login' ? 'login' : 'register')}
+                className="text-xs text-[#737686] hover:text-[#121c28] font-bold cursor-pointer"
               >
-                ← Back to Sign In
+                ← Back to {otpFlow === 'login' ? 'Sign In' : 'Registration Form'}
               </button>
             </div>
           </form>

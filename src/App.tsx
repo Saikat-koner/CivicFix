@@ -316,22 +316,27 @@ export default function App() {
   const [resetEmailParam, setResetEmailParam] = useState<string | null>(null);
   const pendingAuthActionRef = useRef<(() => void) | null>(null);
 
-  // Auto-detect ?reset_token=... or ?auth_mode=forgot in URL for 1-click password reset links
+  // Auto-detect ?reset_token=..., ?auth_mode=forgot, ?forgot=true, or #forgot-password in URL
   useEffect(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const token = urlParams.get('reset_token');
       const email = urlParams.get('email');
-      const mode = urlParams.get('auth_mode');
+      const mode = urlParams.get('auth_mode') || urlParams.get('auth');
+      const isForgotHash = window.location.hash === '#forgot' || window.location.hash === '#forgot-password';
+      const isLoginHash = window.location.hash === '#login' || window.location.hash === '#signin';
 
       if (token) {
         setResetTokenParam(token);
         if (email) setResetEmailParam(email);
         setAuthModalMode('forgot');
         setShowAuthModal(true);
-      } else if (mode === 'forgot') {
+      } else if (mode === 'forgot' || urlParams.has('forgot') || isForgotHash) {
         if (email) setResetEmailParam(email);
         setAuthModalMode('forgot');
+        setShowAuthModal(true);
+      } else if (mode === 'login' || isLoginHash) {
+        setAuthModalMode('login');
         setShowAuthModal(true);
       }
     } catch {
