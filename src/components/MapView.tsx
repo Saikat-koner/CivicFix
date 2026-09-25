@@ -77,6 +77,11 @@ import {
   AlertCircle,
   Box,
   RotateCw,
+  Building,
+  Car,
+  Moon,
+  Globe,
+  Activity,
 } from 'lucide-react';
 
 export type MapTileLayer =
@@ -87,6 +92,7 @@ export type MapTileLayer =
   | 'esri_streets'
   | 'esri_canvas'
   | 'satellite'
+  | 'hybrid'
   | 'esri_topo'
   | 'esri_relief'
   | 'natgeo'
@@ -168,17 +174,111 @@ function getMapStyleSpec(layer: MapTileLayer | string, isDark: boolean): string 
     };
   }
 
-  // 2. Clean Grayscale Focus Canvas (Positron) - Suppresses map clutter for high-density issue & heatmap focus
-  if (layer === 'positron') {
+  // 2. Civic Hybrid: High-Res Satellite Imagery + Cadastral Street Labels & Ward Boundaries
+  if (layer === 'hybrid') {
+    return {
+      version: 8,
+      sources: {
+        'satellite-tiles': {
+          type: 'raster',
+          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256,
+          attribution: '© Esri, Maxar, Earthstar Geographics',
+          maxzoom: 19,
+        },
+        'places-tiles': {
+          type: 'raster',
+          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256,
+          attribution: '© Esri',
+          maxzoom: 19,
+        },
+      },
+      layers: [
+        {
+          id: 'satellite-layer',
+          type: 'raster',
+          source: 'satellite-tiles',
+          minzoom: 0,
+          maxzoom: 22,
+        },
+        {
+          id: 'places-layer',
+          type: 'raster',
+          source: 'places-tiles',
+          minzoom: 0,
+          maxzoom: 22,
+        },
+      ],
+    };
+  }
+
+  // 3. Municipal Road Grid & Corridors (Esri World Street Map) - Road works, pothole patching, arterial routing
+  if (layer === 'esri_streets') {
+    return {
+      version: 8,
+      sources: {
+        'esri-streets-tiles': {
+          type: 'raster',
+          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256,
+          attribution: '© Esri, HERE, Garmin, USGS, NGA',
+          maxzoom: 19,
+        },
+      },
+      layers: [
+        {
+          id: 'esri-streets-layer',
+          type: 'raster',
+          source: 'esri-streets-tiles',
+          minzoom: 0,
+          maxzoom: 22,
+        },
+      ],
+    };
+  }
+
+  // 4. Drainage, Watershed & Flood Contours (Esri World Topo Map) - Stormwater drains, monsoon flood stagnation, sewage slopes
+  if (layer === 'topo' || layer === 'esri_topo' || layer === 'esri_relief') {
+    return {
+      version: 8,
+      sources: {
+        'esri-topo-tiles': {
+          type: 'raster',
+          tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}'],
+          tileSize: 256,
+          attribution: '© Esri, HERE, Garmin, Intermap, USGS, METI/NASA',
+          maxzoom: 19,
+        },
+      },
+      layers: [
+        {
+          id: 'esri-topo-layer',
+          type: 'raster',
+          source: 'esri-topo-tiles',
+          minzoom: 0,
+          maxzoom: 22,
+        },
+      ],
+    };
+  }
+
+  // 5. Transit & Commuter Corridors (OpenFreeMap Bright 3D Vector) - Bus routes, metro lines, pedestrian paths & civic POIs
+  if (layer === 'bright' || layer === 'voyager' || layer === 'carto_voyager' || layer === 'cyclosm') {
+    return 'https://tiles.openfreemap.org/styles/bright';
+  }
+
+  // 6. Clean Grayscale Focus Canvas (Positron) - Suppresses map clutter for high-density issue & heatmap focus
+  if (layer === 'positron' || layer === 'esri_canvas') {
     return 'https://tiles.openfreemap.org/styles/positron';
   }
 
-  // 3. Night & Outages Dark Vector - High-contrast dark vector for reporting streetlight outages and night hazards
+  // 7. Night & Outages Dark Vector - High-contrast dark vector for reporting streetlight outages and night hazards
   if (layer === 'dark' || layer === 'carto_dark') {
     return 'https://tiles.openfreemap.org/styles/dark';
   }
 
-  // 4. Default: Civic Street & Ward 3D Vector (Liberty) - 3D buildings, city street grid, landmarks & ward boundaries
+  // 8. Default: Civic Street & Ward 3D Vector (Liberty) - 3D buildings, city street grid, landmarks & ward boundaries
   return 'https://tiles.openfreemap.org/styles/liberty';
 }
 
@@ -231,7 +331,16 @@ export const MapView: React.FC<MapViewProps> = ({
 
   // Synchronize tile layer with dark mode theme and sanitize any obsolete/non-civic layers
   useEffect(() => {
-    const validCivicLayers: MapTileLayer[] = ['liberty', 'satellite', 'dark', 'positron'];
+    const validCivicLayers: MapTileLayer[] = [
+      'liberty',
+      'satellite',
+      'hybrid',
+      'esri_streets',
+      'topo',
+      'bright',
+      'dark',
+      'positron',
+    ];
     if (!validCivicLayers.includes(currentLayer)) {
       setCurrentLayer(isDarkMode ? 'dark' : 'liberty');
       return;
@@ -400,6 +509,10 @@ export const MapView: React.FC<MapViewProps> = ({
   const DISPLAY_MAP_LAYERS: MapTileLayer[] = [
     'liberty',
     'satellite',
+    'hybrid',
+    'esri_streets',
+    'topo',
+    'bright',
     'dark',
     'positron',
   ];
@@ -420,6 +533,30 @@ export const MapView: React.FC<MapViewProps> = ({
       group: 'Civic Views',
       badge: 'Aerial Imagery',
     },
+    hybrid: {
+      name: 'Civic Hybrid (Aerial + Cadastre)',
+      tag: 'Satellite imagery overlaid with street names, road numbers & ward borders',
+      group: 'Civic Views',
+      badge: 'Aerial Cadastre',
+    },
+    esri_streets: {
+      name: 'Municipal Road Grid & Corridors',
+      tag: 'High-visibility road hierarchies, highway shields, street names & routing',
+      group: 'Civic Views',
+      badge: 'Road Works',
+    },
+    topo: {
+      name: 'Drainage & Flood Topography',
+      tag: 'Elevation contours & terrain slopes for waterlogging & storm drain runoff',
+      group: 'Civic Views',
+      badge: 'Drainage & Slopes',
+    },
+    bright: {
+      name: 'Transit & Commuter Corridors',
+      tag: 'High-contrast vector map highlighting bus routes, metro rails & civic POIs',
+      group: 'Civic Views',
+      badge: 'Transit & 3D',
+    },
     dark: {
       name: 'Night & Outages Mode',
       tag: 'High-contrast dark vector for streetlights & night hazards',
@@ -432,17 +569,7 @@ export const MapView: React.FC<MapViewProps> = ({
       group: 'Civic Views',
       badge: 'Marker Focus',
     },
-    bright: {
-      name: 'Civic Street (Alias)',
-      tag: 'Redirects to 3D Street Map',
-      group: 'Legacy',
-    },
     osm: {
-      name: 'Civic Street (Alias)',
-      tag: 'Redirects to 3D Street Map',
-      group: 'Legacy',
-    },
-    esri_streets: {
       name: 'Civic Street (Alias)',
       tag: 'Redirects to 3D Street Map',
       group: 'Legacy',
@@ -453,8 +580,8 @@ export const MapView: React.FC<MapViewProps> = ({
       group: 'Legacy',
     },
     esri_topo: {
-      name: 'Civic Street (Alias)',
-      tag: 'Redirects to 3D Street Map',
+      name: 'Drainage Topo (Alias)',
+      tag: 'Redirects to Drainage Topo',
       group: 'Legacy',
     },
     natgeo: {
@@ -463,18 +590,18 @@ export const MapView: React.FC<MapViewProps> = ({
       group: 'Legacy',
     },
     esri_relief: {
-      name: 'Civic Street (Alias)',
-      tag: 'Redirects to 3D Street Map',
+      name: 'Drainage Topo (Alias)',
+      tag: 'Redirects to Drainage Topo',
       group: 'Legacy',
     },
     voyager: {
-      name: 'Civic Street (Alias)',
-      tag: 'Redirects to 3D Street Map',
+      name: 'Transit Corridors (Alias)',
+      tag: 'Redirects to Transit Corridors',
       group: 'Legacy',
     },
     cyclosm: {
-      name: 'Civic Street (Alias)',
-      tag: 'Redirects to 3D Street Map',
+      name: 'Transit Corridors (Alias)',
+      tag: 'Redirects to Transit Corridors',
       group: 'Legacy',
     },
     hot: {
@@ -483,18 +610,13 @@ export const MapView: React.FC<MapViewProps> = ({
       group: 'Legacy',
     },
     carto_voyager: {
-      name: 'Civic Street (Alias)',
-      tag: 'Redirects to 3D Street Map',
+      name: 'Transit Corridors (Alias)',
+      tag: 'Redirects to Transit Corridors',
       group: 'Legacy',
     },
     carto_dark: {
       name: 'Night Mode (Alias)',
       tag: 'Redirects to Night Mode',
-      group: 'Legacy',
-    },
-    topo: {
-      name: 'Civic Street (Alias)',
-      tag: 'Redirects to 3D Street Map',
       group: 'Legacy',
     },
   };
@@ -1318,6 +1440,30 @@ export const MapView: React.FC<MapViewProps> = ({
     }, 2500);
   };
 
+  const getLayerIcon = (layerKey: MapTileLayer) => {
+    switch (layerKey) {
+      case 'liberty':
+        return <Building className="w-3.5 h-3.5 text-blue-500" />;
+      case 'satellite':
+        return <Globe className="w-3.5 h-3.5 text-emerald-500" />;
+      case 'hybrid':
+        return <Layers className="w-3.5 h-3.5 text-indigo-500" />;
+      case 'esri_streets':
+        return <Car className="w-3.5 h-3.5 text-amber-500" />;
+      case 'topo':
+      case 'esri_topo':
+        return <Activity className="w-3.5 h-3.5 text-teal-500" />;
+      case 'bright':
+        return <Sparkles className="w-3.5 h-3.5 text-cyan-500" />;
+      case 'dark':
+      case 'carto_dark':
+        return <Moon className="w-3.5 h-3.5 text-purple-400" />;
+      case 'positron':
+      default:
+        return <Eye className="w-3.5 h-3.5 text-slate-400" />;
+    }
+  };
+
   return (
     <div
       id="civic-map-view-container"
@@ -1388,16 +1534,21 @@ export const MapView: React.FC<MapViewProps> = ({
           </button>
 
           {showLayerMenu && (
-            <div className="absolute right-0 top-12 w-80 max-h-[75vh] overflow-y-auto bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-700 p-2.5 z-50 text-xs">
+            <div className="absolute right-0 top-12 w-84 max-h-[80vh] overflow-y-auto bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-700 p-2.5 z-50 text-xs">
               <div className="flex items-center justify-between px-2 py-1.5 mb-2 border-b border-gray-100 dark:border-slate-800">
-                <span className="font-bold text-gray-900 dark:text-white">Civic Basemaps</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-gray-900 dark:text-white">Civic Basemaps</span>
+                  <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded-full border border-blue-200/50 dark:border-blue-800/50">
+                    8 Views
+                  </span>
+                </div>
                 <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200/50 dark:border-emerald-800/50">
                   Zero API Key
                 </span>
               </div>
               <div className="space-y-1.5">
                 {DISPLAY_MAP_LAYERS.map((key) => {
-                  const isSelected = currentLayer === key || (key === 'liberty' && currentLayer === 'voyager');
+                  const isSelected = currentLayer === key;
                   const info = tileUrls[key];
                   if (!info) return null;
                   return (
@@ -1408,34 +1559,43 @@ export const MapView: React.FC<MapViewProps> = ({
                         setCurrentLayer(key);
                         setShowLayerMenu(false);
                       }}
-                      className={`w-full text-left px-3 py-2.5 rounded-xl flex flex-col transition-all cursor-pointer ${
+                      className={`w-full text-left px-2.5 py-2 rounded-xl flex items-start gap-2.5 transition-all cursor-pointer ${
                         isSelected
                           ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-bold ring-1 ring-blue-500/25 shadow-xs'
                           : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100/80 dark:hover:bg-slate-800/80'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-1.5">
-                        <span className="truncate text-xs font-semibold">{info.name}</span>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {info.badge && (
-                            <span
-                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                                isSelected
-                                  ? 'bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300'
-                                  : 'bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-gray-400'
-                              }`}
-                            >
-                              {info.badge}
-                            </span>
-                          )}
-                          {isSelected && (
-                            <span className="w-2 h-2 rounded-full bg-blue-600 dark:bg-blue-400 shrink-0" />
-                          )}
-                        </div>
+                      <div className={`mt-0.5 p-1 rounded-lg shrink-0 ${
+                        isSelected
+                          ? 'bg-blue-100 dark:bg-blue-900/60'
+                          : 'bg-gray-100 dark:bg-slate-800'
+                      }`}>
+                        {getLayerIcon(key)}
                       </div>
-                      <span className="text-[10.5px] text-gray-500 dark:text-gray-400 font-normal line-clamp-1 mt-0.5">
-                        {info.tag}
-                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="truncate text-xs font-semibold">{info.name}</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {info.badge && (
+                              <span
+                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                                  isSelected
+                                    ? 'bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300'
+                                    : 'bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-gray-400'
+                                }`}
+                              >
+                                {info.badge}
+                              </span>
+                            )}
+                            {isSelected && (
+                              <span className="w-2 h-2 rounded-full bg-blue-600 dark:bg-blue-400 shrink-0" />
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-[10.5px] text-gray-500 dark:text-gray-400 font-normal line-clamp-1 mt-0.5">
+                          {info.tag}
+                        </span>
+                      </div>
                     </button>
                   );
                 })}
