@@ -82,9 +82,9 @@ router.get('/', async (req: AuthenticatedRequest, res: Response, next: NextFunct
     apiCache.set(cacheKey, responsePayload, 3500);
     res.setHeader('X-Cache', 'MISS');
     res.json(responsePayload);
-  } catch (err) {
+  } catch (err: any) {
     // Fallback to in-memory store if DB query encounters transient issue
-    console.error('PostgreSQL query fallback to store:', err);
+    console.warn('[PostgreSQL Note] Serving issues from memory cache:', err?.message || err);
     try {
       const { status, category, district, search } = req.query;
       const issues = dataStore.getAllIssues({

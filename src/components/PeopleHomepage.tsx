@@ -1071,86 +1071,109 @@ export const PeopleHomepage: React.FC<PeopleHomepageProps> = ({
               </div>
             </div>
 
-            {/* Scroll Left Button if overflow */}
-            {canScrollLeft && (
-              <button
-                id="public-header-scroll-left-btn"
-                type="button"
-                onClick={() => scrollHeaderByAmount(-180)}
-                className="shrink-0 p-1.5 rounded-full bg-white dark:bg-gray-800 shadow-md border border-gray-200 dark:border-gray-700 hover:border-[#0050c8] text-[#0050c8] transition-all cursor-pointer z-20"
-                title="Move Header Left (←)"
-                aria-label="Scroll header left"
-              >
-                <ChevronLeft className="w-3.5 h-3.5 text-[#0050c8]" />
-              </button>
-            )}
+            {/* Middle Nav Links Track (Scrollable when needed, separated from action buttons) */}
+            <div className="flex-1 min-w-0 flex items-center justify-center lg:justify-end gap-1 sm:gap-1.5 overflow-hidden">
+              {/* Scroll Left Button if overflow */}
+              {canScrollLeft && (
+                <button
+                  id="public-header-scroll-left-btn"
+                  type="button"
+                  onClick={() => scrollHeaderByAmount(-180)}
+                  className="shrink-0 p-1.5 rounded-full bg-white dark:bg-gray-800 shadow-md border border-gray-200 dark:border-gray-700 hover:border-[#0050c8] text-[#0050c8] transition-all cursor-pointer z-20"
+                  title="Move Header Left (←)"
+                  aria-label="Scroll header left"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 text-[#0050c8]" />
+                </button>
+              )}
 
-            {/* Movable & Draggable Header Content Track */}
-            <div
-              ref={headerScrollRef}
-              onMouseDown={onHeaderMouseDown}
-              onMouseMove={onHeaderMouseMove}
-              onMouseUp={onHeaderMouseUpOrLeave}
-              onMouseLeave={onHeaderMouseUpOrLeave}
-              onWheel={onHeaderWheel}
-              className="flex-1 overflow-x-auto scrollbar-none flex items-center justify-end gap-1.5 sm:gap-2 md:gap-3 min-w-0 select-none cursor-grab active:cursor-grabbing px-1 py-1 touch-pan-x"
-            >
-              {/* Quick Nav Links & CTA Actions */}
-              <button
-                onClick={() => {
-                  const el = document.getElementById('about-civicfix-section');
-                  el?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="hidden md:inline-flex text-xs font-bold text-[#424655] dark:text-gray-300 hover:text-[#0050c8] dark:hover:text-blue-400 px-2.5 py-1.5 transition-colors cursor-pointer shrink-0"
+              {/* Movable & Draggable Nav Links Track */}
+              <div
+                ref={headerScrollRef}
+                onMouseDown={onHeaderMouseDown}
+                onMouseMove={onHeaderMouseMove}
+                onMouseUp={onHeaderMouseUpOrLeave}
+                onMouseLeave={onHeaderMouseUpOrLeave}
+                onWheel={onHeaderWheel}
+                className="overflow-x-auto scrollbar-none flex items-center justify-start lg:justify-end gap-1.5 sm:gap-2 min-w-0 select-none cursor-grab active:cursor-grabbing px-1 py-1 touch-pan-x"
               >
-                About CivicFix
-              </button>
-              <button
-                onClick={() => {
-                  const el = document.getElementById('how-it-works-section');
-                  el?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="hidden lg:inline-flex text-xs font-bold text-[#424655] dark:text-gray-300 hover:text-[#0050c8] dark:hover:text-blue-400 px-2.5 py-1.5 transition-colors cursor-pointer shrink-0"
-              >
-                How It Works
-              </button>
-              <button
-                onClick={() => {
-                  const el = document.getElementById('reportable-categories-section');
-                  el?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="hidden lg:inline-flex text-xs font-bold text-[#424655] dark:text-gray-300 hover:text-[#0050c8] dark:hover:text-blue-400 px-2.5 py-1.5 transition-colors cursor-pointer shrink-0"
-              >
-                Services
-              </button>
-              <button
-                onClick={() => {
-                  const el = document.getElementById('citizen-charter-section');
-                  el?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="hidden lg:inline-flex text-xs font-bold text-[#424655] dark:text-gray-300 hover:text-[#0050c8] dark:hover:text-blue-400 px-2.5 py-1.5 transition-colors cursor-pointer shrink-0"
-              >
-                Citizen Charter
-              </button>
+                {/* Quick Nav Links & CTA Actions */}
+                <button
+                  onClick={() => {
+                    const el = document.getElementById('about-civicfix-section');
+                    el?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="hidden md:inline-flex text-xs font-bold text-[#424655] dark:text-gray-300 hover:text-[#0050c8] dark:hover:text-blue-400 px-2.5 py-1.5 transition-colors cursor-pointer shrink-0"
+                >
+                  About CivicFix
+                </button>
+                <button
+                  onClick={() => {
+                    const el = document.getElementById('how-it-works-section');
+                    el?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="hidden lg:inline-flex text-xs font-bold text-[#424655] dark:text-gray-300 hover:text-[#0050c8] dark:hover:text-blue-400 px-2.5 py-1.5 transition-colors cursor-pointer shrink-0"
+                >
+                  How It Works
+                </button>
+                <button
+                  onClick={() => {
+                    const el = document.getElementById('reportable-categories-section');
+                    el?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="hidden lg:inline-flex text-xs font-bold text-[#424655] dark:text-gray-300 hover:text-[#0050c8] dark:hover:text-blue-400 px-2.5 py-1.5 transition-colors cursor-pointer shrink-0"
+                >
+                  Services
+                </button>
+                <button
+                  onClick={() => {
+                    const el = document.getElementById('citizen-charter-section');
+                    el?.scrollIntoView({ behavior: 'smooth' });
+                  }}
+                  className="hidden lg:inline-flex text-xs font-bold text-[#424655] dark:text-gray-300 hover:text-[#0050c8] dark:hover:text-blue-400 px-2.5 py-1.5 transition-colors cursor-pointer shrink-0"
+                >
+                  Citizen Charter
+                </button>
 
-              {/* Public Quick Track Issue Nav Button */}
-              <button
-                onClick={() => {
-                  const el = document.getElementById('track-issue-widget');
-                  el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  const input = document.getElementById('track-issue-code-input');
-                  input?.focus();
-                  soundFX.playClick();
-                }}
-                className="hidden md:inline-flex text-xs font-black text-[#0050c8] dark:text-blue-300 hover:text-[#003da1] dark:hover:text-white px-2.5 py-1.5 bg-blue-50/80 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900 rounded-xl border border-blue-200 dark:border-blue-800 transition-colors cursor-pointer items-center gap-1.5 shadow-2xs shrink-0"
-                title="Track any report status without logging in"
-              >
-                <Search className="w-3.5 h-3.5 text-[#0050c8] dark:text-blue-400" />
-                <span>Track Issue</span>
-              </button>
+                {/* Public Quick Track Issue Nav Button */}
+                <button
+                  onClick={() => {
+                    const el = document.getElementById('track-issue-widget');
+                    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    const input = document.getElementById('track-issue-code-input');
+                    input?.focus();
+                    soundFX.playClick();
+                  }}
+                  className="hidden md:inline-flex text-xs font-black text-[#0050c8] dark:text-blue-300 hover:text-[#003da1] dark:hover:text-white px-2.5 py-1.5 bg-blue-50/80 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900 rounded-xl border border-blue-200 dark:border-blue-800 transition-colors cursor-pointer items-center gap-1.5 shadow-2xs shrink-0"
+                  title="Track any report status without logging in"
+                >
+                  <Search className="w-3.5 h-3.5 text-[#0050c8] dark:text-blue-400" />
+                  <span>Track Issue</span>
+                </button>
+              </div>
 
+              {/* Scroll Right Button if overflow */}
+              {canScrollRight && (
+                <button
+                  id="public-header-scroll-right-btn"
+                  type="button"
+                  onClick={() => scrollHeaderByAmount(180)}
+                  className="shrink-0 p-1.5 rounded-full bg-white dark:bg-gray-800 shadow-md border border-gray-200 dark:border-gray-700 hover:border-[#0050c8] text-[#0050c8] transition-all cursor-pointer z-20"
+                  title="Move Header Right (→)"
+                  aria-label="Scroll header right"
+                >
+                  <ChevronRight className="w-3.5 h-3.5 text-[#0050c8]" />
+                </button>
+              )}
+            </div>
+
+            {/* Pinned Right Cluster: Theme Switch, Fullscreen, Share, Hotlines, Sign In & Register */}
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 z-10">
               {/* Theme Toggle (Compact on mobile, sliding switch on desktop) */}
-              <div className="flex items-center shrink-0" title={isDark ? 'Switch to Light Theme' : 'Switch to Dark Theme'}>
+              <div
+                className="flex items-center shrink-0 px-0.5"
+                title={isDark ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
+              >
                 {/* Mobile compact icon toggle */}
                 <button
                   id="homepage-theme-toggle-btn-mobile"
@@ -1170,7 +1193,7 @@ export const PeopleHomepage: React.FC<PeopleHomepageProps> = ({
                   aria-checked={isDark}
                   aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
                   onClick={handleThemeToggle}
-                  className={`hidden sm:inline-flex group relative items-center h-8 w-14 rounded-full p-0.5 transition-all duration-300 cursor-pointer border shadow-2xs focus:outline-none focus:ring-2 focus:ring-[#0050c8]/40 shrink-0 ${
+                  className={`hidden sm:inline-flex group relative items-center h-8 w-14 rounded-full p-0.5 transition-all duration-300 cursor-pointer border shadow-2xs focus:outline-none focus:ring-2 focus:ring-[#0050c8]/40 shrink-0 select-none ${
                     isDark
                       ? 'bg-slate-800 border-slate-700 hover:border-slate-600'
                       : 'bg-slate-200/90 border-slate-300 hover:border-slate-400'
@@ -1231,7 +1254,7 @@ export const PeopleHomepage: React.FC<PeopleHomepageProps> = ({
                 title="Share CivicFix via mobile native sharing"
               >
                 <Share2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <span>Share</span>
+                <span className="hidden xs:inline">Share</span>
               </button>
 
               {/* Hotlines Button */}
@@ -1243,6 +1266,7 @@ export const PeopleHomepage: React.FC<PeopleHomepageProps> = ({
                 >
                   <PhoneCall className="w-3.5 h-3.5 text-red-600 dark:text-red-400 animate-pulse shrink-0" />
                   <span className="hidden sm:inline">Emergency Hotlines</span>
+                  <span className="sm:hidden font-black">911</span>
                 </button>
               )}
 
@@ -1263,20 +1287,6 @@ export const PeopleHomepage: React.FC<PeopleHomepageProps> = ({
                 </button>
               </div>
             </div>
-
-            {/* Scroll Right Button if overflow */}
-            {canScrollRight && (
-              <button
-                id="public-header-scroll-right-btn"
-                type="button"
-                onClick={() => scrollHeaderByAmount(180)}
-                className="shrink-0 p-1.5 rounded-full bg-white dark:bg-gray-800 shadow-md border border-gray-200 dark:border-gray-700 hover:border-[#0050c8] text-[#0050c8] transition-all cursor-pointer z-20"
-                title="Move Header Right (→)"
-                aria-label="Scroll header right"
-              >
-                <ChevronRight className="w-3.5 h-3.5 text-[#0050c8]" />
-              </button>
-            )}
           </div>
         </header>
       )}

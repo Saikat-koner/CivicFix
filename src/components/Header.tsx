@@ -283,114 +283,131 @@ export const Header = ({
           </div>
         </div>
 
-        {/* Scroll Left Button */}
-        {canScrollLeft && (
-          <button
-            id="header-scroll-left-btn"
-            type="button"
-            onClick={() => scrollByAmount(-240)}
-            className="shrink-0 p-1.5 rounded-full bg-white dark:bg-gray-800 shadow-md border border-gray-200 dark:border-gray-700 hover:border-[#0050c8] text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700 transition-all cursor-pointer z-20 animate-in fade-in"
-            title="Move Header Left (←)"
-            aria-label="Scroll header left"
+        {/* Movable & Draggable Header Content Track (Desktop Navigation) */}
+        <div className="flex-1 min-w-0 flex items-center justify-start xl:justify-center gap-1 overflow-hidden">
+          {/* Scroll Left Button */}
+          {canScrollLeft && (
+            <button
+              id="header-scroll-left-btn"
+              type="button"
+              onClick={() => scrollByAmount(-240)}
+              className="shrink-0 p-1.5 rounded-full bg-white dark:bg-gray-800 shadow-md border border-gray-200 dark:border-gray-700 hover:border-[#0050c8] text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700 transition-all cursor-pointer z-20 animate-in fade-in"
+              title="Move Header Left (←)"
+              aria-label="Scroll header left"
+            >
+              <ChevronLeft className="w-4 h-4 text-[#0050c8]" />
+            </button>
+          )}
+
+          <div
+            ref={scrollRef}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={onMouseUpOrLeave}
+            onMouseLeave={onMouseUpOrLeave}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            onWheel={onWheel}
+            className="overflow-x-auto scrollbar-none flex items-center gap-2.5 sm:gap-4 min-w-0 select-none cursor-grab active:cursor-grabbing px-1 py-1 touch-pan-x"
           >
-            <ChevronLeft className="w-4 h-4 text-[#0050c8]" />
+            {/* Desktop Navigation */}
+            <nav className="hidden lg:flex items-center gap-0.5 xl:gap-1 bg-[#f8f9ff] dark:bg-gray-800/60 p-1 rounded-full border border-[#c2c6d7]/40 dark:border-gray-700 shadow-inner shrink-0">
+            <button
+              id="nav-home-btn"
+              onClick={() => onTabChange('home')}
+              className={`px-2.5 xl:px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                currentTab === 'home'
+                  ? 'bg-[#1d68f2] text-white shadow-sm'
+                  : 'text-[#424655] dark:text-gray-300 hover:text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700'
+              }`}
+            >
+              <span className="hidden xl:inline">City Radar</span>
+              <span className="xl:hidden">Radar</span>
+            </button>
+            <button
+              id="nav-portal-btn"
+              onClick={() => onTabChange('portal')}
+              className={`px-2.5 xl:px-3.5 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                currentTab === 'portal'
+                  ? 'bg-[#1d68f2] text-white shadow-sm'
+                  : 'text-[#424655] dark:text-gray-300 hover:text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700'
+              }`}
+            >
+              <Building2 className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden xl:inline">Citizen Portal</span>
+              <span className="xl:hidden">Portal</span>
+            </button>
+            <button
+              id="nav-report-btn"
+              onClick={() => onTabChange('report')}
+              className={`px-2.5 xl:px-3.5 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                currentTab === 'report'
+                  ? 'bg-[#1d68f2] text-white shadow-sm'
+                  : 'text-[#424655] dark:text-gray-300 hover:text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden xl:inline">Report Issue</span>
+              <span className="xl:hidden">Report</span>
+            </button>
+            <button
+              id="nav-activity-btn"
+              onClick={() => onTabChange('activity')}
+              className={`px-2.5 xl:px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                currentTab === 'activity'
+                  ? 'bg-[#1d68f2] text-white shadow-sm'
+                  : 'text-[#424655] dark:text-gray-300 hover:text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700'
+              }`}
+            >
+              Activity
+            </button>
+            <button
+              id="nav-ranks-btn"
+              onClick={() => onTabChange('ranks')}
+              className={`px-2.5 xl:px-3.5 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                currentTab === 'ranks'
+                  ? 'bg-[#1d68f2] text-white shadow-sm'
+                  : 'text-[#424655] dark:text-gray-300 hover:text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700'
+              }`}
+            >
+              <Trophy className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span className="hidden xl:inline">Leaderboard</span>
+              <span className="xl:hidden">Ranks</span>
+            </button>
+            <button
+              id="nav-admin-btn"
+              onClick={() => onTabChange('admin')}
+              className={`px-2.5 xl:px-3.5 py-1.5 rounded-full text-xs font-extrabold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                currentTab === 'admin'
+                  ? 'bg-[#003180] text-white shadow-sm'
+                  : 'text-[#003180] dark:text-blue-300 hover:bg-[#EDF4FF] dark:hover:bg-gray-700'
+              }`}
+            >
+              <UserCheck className="w-3.5 h-3.5 text-[#0050c8] dark:text-blue-300 shrink-0" />
+              <span className="hidden xl:inline">Admin Command</span>
+              <span className="xl:hidden">Admin</span>
+            </button>
+          </nav>
+        </div>
+
+        {/* Scroll Right Button */}
+        {canScrollRight && (
+          <button
+            id="header-scroll-right-btn"
+            type="button"
+            onClick={() => scrollByAmount(240)}
+            className="shrink-0 p-1.5 rounded-full bg-white dark:bg-gray-800 shadow-md border border-gray-200 dark:border-gray-700 hover:border-[#0050c8] text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700 transition-all cursor-pointer z-20 animate-in fade-in"
+            title="Move Header Right (→)"
+            aria-label="Scroll header right"
+          >
+            <ChevronRight className="w-4 h-4 text-[#0050c8]" />
           </button>
         )}
+      </div>
 
-        {/* Movable & Draggable Header Content Track */}
-        <div
-          ref={scrollRef}
-          onMouseDown={onMouseDown}
-          onMouseMove={onMouseMove}
-          onMouseUp={onMouseUpOrLeave}
-          onMouseLeave={onMouseUpOrLeave}
-          onTouchStart={onTouchStart}
-          onTouchMove={onTouchMove}
-          onTouchEnd={onTouchEnd}
-          onWheel={onWheel}
-          className="flex-1 overflow-x-auto scrollbar-none flex items-center justify-between gap-2.5 sm:gap-4 min-w-0 select-none cursor-grab active:cursor-grabbing px-1 py-1 touch-pan-x"
-        >
-          {/* Desktop Navigation */}
-          <nav className="hidden lg:flex items-center gap-0.5 xl:gap-1 bg-[#f8f9ff] dark:bg-gray-800/60 p-1 rounded-full border border-[#c2c6d7]/40 dark:border-gray-700 shadow-inner shrink-0">
-          <button
-            id="nav-home-btn"
-            onClick={() => onTabChange('home')}
-            className={`px-2.5 xl:px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-              currentTab === 'home'
-                ? 'bg-[#1d68f2] text-white shadow-sm'
-                : 'text-[#424655] dark:text-gray-300 hover:text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700'
-            }`}
-          >
-            <span className="hidden xl:inline">City Radar</span>
-            <span className="xl:hidden">Radar</span>
-          </button>
-          <button
-            id="nav-portal-btn"
-            onClick={() => onTabChange('portal')}
-            className={`px-2.5 xl:px-3.5 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-              currentTab === 'portal'
-                ? 'bg-[#1d68f2] text-white shadow-sm'
-                : 'text-[#424655] dark:text-gray-300 hover:text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700'
-            }`}
-          >
-            <Building2 className="w-3.5 h-3.5 shrink-0" />
-            <span className="hidden xl:inline">Citizen Portal</span>
-            <span className="xl:hidden">Portal</span>
-          </button>
-          <button
-            id="nav-report-btn"
-            onClick={() => onTabChange('report')}
-            className={`px-2.5 xl:px-3.5 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-              currentTab === 'report'
-                ? 'bg-[#1d68f2] text-white shadow-sm'
-                : 'text-[#424655] dark:text-gray-300 hover:text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5 shrink-0" />
-            <span className="hidden xl:inline">Report Issue</span>
-            <span className="xl:hidden">Report</span>
-          </button>
-          <button
-            id="nav-activity-btn"
-            onClick={() => onTabChange('activity')}
-            className={`px-2.5 xl:px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-              currentTab === 'activity'
-                ? 'bg-[#1d68f2] text-white shadow-sm'
-                : 'text-[#424655] dark:text-gray-300 hover:text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700'
-            }`}
-          >
-            Activity
-          </button>
-          <button
-            id="nav-ranks-btn"
-            onClick={() => onTabChange('ranks')}
-            className={`px-2.5 xl:px-3.5 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-              currentTab === 'ranks'
-                ? 'bg-[#1d68f2] text-white shadow-sm'
-                : 'text-[#424655] dark:text-gray-300 hover:text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700'
-            }`}
-          >
-            <Trophy className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-            <span className="hidden xl:inline">Leaderboard</span>
-            <span className="xl:hidden">Ranks</span>
-          </button>
-          <button
-            id="nav-admin-btn"
-            onClick={() => onTabChange('admin')}
-            className={`px-2.5 xl:px-3.5 py-1.5 rounded-full text-xs font-extrabold transition-all flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-              currentTab === 'admin'
-                ? 'bg-[#003180] text-white shadow-sm'
-                : 'text-[#003180] dark:text-blue-300 hover:bg-[#EDF4FF] dark:hover:bg-gray-700'
-            }`}
-          >
-            <UserCheck className="w-3.5 h-3.5 text-[#0050c8] dark:text-blue-300 shrink-0" />
-            <span className="hidden xl:inline">Admin Command</span>
-            <span className="xl:hidden">Admin</span>
-          </button>
-        </nav>
-
-        {/* Right Section: Role Switcher, Emergency Hotlines, Credits Pill, Notifications, User Avatar */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+      {/* Right Section: Role Switcher, Emergency Hotlines, Credits Pill, Notifications, User Avatar */}
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 z-10">
           {/* Connection Status & Offline Queued Reports Indicator */}
           <ConnectionStatusIndicator
             isOnline={isOnline}
@@ -725,21 +742,6 @@ export const Header = ({
             </div>
           </div>
         </div>
-      </div>
-
-        {/* Scroll Right Button */}
-        {canScrollRight && (
-          <button
-            id="header-scroll-right-btn"
-            type="button"
-            onClick={() => scrollByAmount(240)}
-            className="shrink-0 p-1.5 rounded-full bg-white dark:bg-gray-800 shadow-md border border-gray-200 dark:border-gray-700 hover:border-[#0050c8] text-[#0050c8] hover:bg-[#EDF4FF] dark:hover:bg-gray-700 transition-all cursor-pointer z-20 animate-in fade-in"
-            title="Move Header Right (→)"
-            aria-label="Scroll header right"
-          >
-            <ChevronRight className="w-4 h-4 text-[#0050c8]" />
-          </button>
-        )}
       </div>
 
       {/* Persistent Offline Ribbon Notification */}
