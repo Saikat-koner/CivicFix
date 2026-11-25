@@ -263,23 +263,118 @@ function getMapStyleSpec(layer: MapTileLayer | string, isDark: boolean): string 
     };
   }
 
-  // 5. Transit & Commuter Corridors (OpenFreeMap Bright 3D Vector) - Bus routes, metro lines, pedestrian paths & civic POIs
+  // 5. Transit & Commuter Corridors (OpenStreetMap Standard) - Bus routes, metro lines, pedestrian paths & civic POIs
   if (layer === 'bright' || layer === 'voyager' || layer === 'carto_voyager' || layer === 'cyclosm') {
-    return 'https://tiles.openfreemap.org/styles/bright';
+    return {
+      version: 8,
+      sources: {
+        'osm-bright-tiles': {
+          type: 'raster',
+          tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+          tileSize: 256,
+          attribution: '© OpenStreetMap contributors',
+          maxzoom: 19,
+        },
+      },
+      layers: [
+        {
+          id: 'osm-bright-layer',
+          type: 'raster',
+          source: 'osm-bright-tiles',
+          minzoom: 0,
+          maxzoom: 22,
+        },
+      ],
+    };
   }
 
-  // 6. Clean Grayscale Focus Canvas (Positron) - Suppresses map clutter for high-density issue & heatmap focus
+  // 6. Clean Grayscale Focus Canvas (CARTO Positron Retina) - Suppresses map clutter for high-density issue & heatmap focus
   if (layer === 'positron' || layer === 'esri_canvas') {
-    return 'https://tiles.openfreemap.org/styles/positron';
+    return {
+      version: 8,
+      sources: {
+        'carto-positron-tiles': {
+          type: 'raster',
+          tiles: [
+            'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
+            'https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
+            'https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
+            'https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
+          ],
+          tileSize: 256,
+          attribution: '© OpenStreetMap contributors © CARTO',
+          maxzoom: 20,
+        },
+      },
+      layers: [
+        {
+          id: 'carto-positron-layer',
+          type: 'raster',
+          source: 'carto-positron-tiles',
+          minzoom: 0,
+          maxzoom: 22,
+        },
+      ],
+    };
   }
 
-  // 7. Night & Outages Dark Vector - High-contrast dark vector for reporting streetlight outages and night hazards
-  if (layer === 'dark' || layer === 'carto_dark') {
-    return 'https://tiles.openfreemap.org/styles/dark';
+  // 7. Night & Outages Dark Canvas (CARTO Dark Matter Retina) - High-contrast dark map for streetlight outages and night hazards
+  if (layer === 'dark' || layer === 'carto_dark' || (isDark && layer === 'liberty')) {
+    return {
+      version: 8,
+      sources: {
+        'carto-dark-tiles': {
+          type: 'raster',
+          tiles: [
+            'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+            'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+            'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+            'https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+          ],
+          tileSize: 256,
+          attribution: '© OpenStreetMap contributors © CARTO',
+          maxzoom: 20,
+        },
+      },
+      layers: [
+        {
+          id: 'carto-dark-layer',
+          type: 'raster',
+          source: 'carto-dark-tiles',
+          minzoom: 0,
+          maxzoom: 22,
+        },
+      ],
+    };
   }
 
-  // 8. Default: Civic Street & Ward 3D Vector (Liberty) - 3D buildings, city street grid, landmarks & ward boundaries
-  return 'https://tiles.openfreemap.org/styles/liberty';
+  // 8. Default: Civic Street & Ward Canvas (CARTO Voyager Retina) - Crisp city street grid, landmarks & ward boundaries
+  return {
+    version: 8,
+    sources: {
+      'carto-voyager-tiles': {
+        type: 'raster',
+        tiles: [
+          'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+          'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+          'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+          'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+        ],
+        tileSize: 256,
+        attribution: '© OpenStreetMap contributors © CARTO',
+        maxzoom: 20,
+      },
+    },
+    layers: [
+      {
+        id: 'carto-voyager-layer',
+        type: 'raster',
+        source: 'carto-voyager-tiles',
+        minzoom: 0,
+        maxzoom: 22,
+      },
+    ],
+  };
 }
 
 export const MapView: React.FC<MapViewProps> = ({
@@ -322,6 +417,7 @@ export const MapView: React.FC<MapViewProps> = ({
   const pickerMarkerRef = useRef<MapLibreMarker | null>(null);
   const clickedMarkerRef = useRef<MapLibreMarker | null>(null);
   const activePopupRef = useRef<MapLibrePopup | null>(null);
+  const lastStyleKeyRef = useRef<string | null>(null);
 
   // High reliability Vector & Open GIS tile layer state (100% Free, zero API key)
   const [currentLayer, setCurrentLayer] = useState<MapTileLayer>(isDarkMode ? 'dark' : 'liberty');
@@ -732,6 +828,7 @@ export const MapView: React.FC<MapViewProps> = ({
     if (!mapContainerRef.current || mapRef.current) return;
 
     const styleSpec = getMapStyleSpec(currentLayer, isDarkMode);
+    lastStyleKeyRef.current = `${currentLayer}:${isDarkMode}`;
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
@@ -741,6 +838,13 @@ export const MapView: React.FC<MapViewProps> = ({
       pitch: is3DMode ? 55 : 0,
       bearing: 0,
       maxPitch: 85,
+    });
+
+    // Gracefully absorb transient tile or network errors so MapLibre never throws uncaught AJAXErrors
+    map.on('error', (e) => {
+      if (e?.error?.message) {
+        console.warn('[MapView] Non-fatal map tile notice:', e.error.message);
+      }
     });
 
     map.on('rotate', () => {
@@ -853,10 +957,13 @@ export const MapView: React.FC<MapViewProps> = ({
   };
 
   // -------------------------------------------------------------
-  // 3. Switch Tile Styles (OpenFreeMap vector vs Raster)
+  // 3. Switch Tile Styles (Only when layer or theme actually changes)
   // -------------------------------------------------------------
   useEffect(() => {
     if (!mapRef.current) return;
+    const styleKey = `${currentLayer}:${isDarkMode}`;
+    if (lastStyleKeyRef.current === styleKey) return;
+    lastStyleKeyRef.current = styleKey;
     const styleSpec = getMapStyleSpec(currentLayer, isDarkMode);
     mapRef.current.setStyle(styleSpec);
   }, [currentLayer, isDarkMode]);

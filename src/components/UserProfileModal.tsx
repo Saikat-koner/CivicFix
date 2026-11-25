@@ -5,8 +5,6 @@ import {
   Award,
   MapPin,
   Mail,
-  LogOut,
-  KeyRound,
   Building2,
   ShieldCheck,
   Trophy,
@@ -37,10 +35,7 @@ interface UserProfileModalProps {
   userRole: UserRole;
   email?: string;
   district?: string;
-  isLoggedIn?: boolean;
   onClose: () => void;
-  onOpenAuthModal: (mode?: 'login' | 'register' | 'forgot') => void;
-  onSignOut: () => void;
   defaultView?: 'desktop' | 'mobile';
   onUpdateAvatar?: (newAvatar: string) => void;
 }
@@ -48,12 +43,9 @@ interface UserProfileModalProps {
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   user,
   userRole,
-  email = 'elena.rostova@metro.org',
-  district = 'Downtown Metro Sector (Ward 1)',
-  isLoggedIn = true,
+  email = 'citizen@civicfix.gov.in',
+  district = 'Bengaluru Central (Ward 112)',
   onClose,
-  onOpenAuthModal,
-  onSignOut,
   defaultView = 'desktop',
   onUpdateAvatar,
 }) => {
@@ -249,21 +241,12 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 </div>
               </div>
 
-              {/* Quick Actions */}
+              {/* Open Citizen Access Pill */}
               <div className="flex items-center gap-2">
-                {isLoggedIn && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onSignOut();
-                      onClose();
-                    }}
-                    className="px-3 py-1.5 rounded-xl border border-red-200 text-xs font-extrabold text-red-600 bg-red-50 hover:bg-red-100 flex items-center gap-1 cursor-pointer"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span>Sign Out</span>
-                  </button>
-                )}
+                <span className="px-3 py-1.5 rounded-xl border border-emerald-200 text-xs font-extrabold text-emerald-700 bg-emerald-50 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Open Access Active</span>
+                </span>
               </div>
             </div>
 
@@ -597,33 +580,19 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 </div>
               </div>
 
-              {/* Bottom Quick Switcher */}
+              {/* Open Access Footer */}
               <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-xs">
+                <span className="text-emerald-700 font-bold flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>No Login Required</span>
+                </span>
                 <button
                   type="button"
-                  onClick={() => {
-                    onClose();
-                    onOpenAuthModal('forgot');
-                  }}
-                  className="text-amber-800 font-extrabold hover:underline flex items-center gap-1 cursor-pointer bg-amber-50 hover:bg-amber-100 px-2.5 py-1.5 rounded-xl border border-amber-200 transition-colors shadow-2xs"
-                  title="Reset your account password"
+                  onClick={onClose}
+                  className="text-[#0050c8] font-bold hover:underline cursor-pointer"
                 >
-                  <KeyRound className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Forgot / Reset Password</span>
+                  Done
                 </button>
-
-                {isLoggedIn && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onSignOut();
-                      onClose();
-                    }}
-                    className="text-red-600 font-bold hover:underline cursor-pointer"
-                  >
-                    Sign Out
-                  </button>
-                )}
               </div>
             </div>
           </div>

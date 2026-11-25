@@ -21,8 +21,8 @@ export const CIVIC_FAQ_ITEMS: CivicFaqItem[] = [
     category: 'Rewards',
   },
   {
-    q: 'Can I report issues anonymously?',
-    a: 'Yes. While an account is required to prevent spam and allow you to track your tickets, you can choose to make your name private on public civic cards so only municipal officials see verified coordinates.',
+    q: 'Can I report issues without creating an account?',
+    a: 'Yes! CivicFix is completely open — no login or signup is required. Anyone can view the live radar map, submit geotagged infrastructure reports, upvote hazards, and track repairs immediately.',
     category: 'Privacy',
   },
   {

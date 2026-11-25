@@ -21,7 +21,7 @@ import communicationsRoutes from './server/routes/communications';
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   // High-performance gzip/deflate compression for all text/JSON responses
   app.use(compression());
@@ -56,12 +56,39 @@ async function startServer() {
   app.use(express.static(path.join(process.cwd(), 'public')));
 
   // Vite Middleware / Static Serving
+  // Bind port immediately in dev mode while Vite initializes in parallel to avoid startup probe timeouts
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
+    let viteMiddleware: ReturnType<typeof createViteServer> extends Promise<infer V>
+      ? V extends { middlewares: infer M }
+        ? M | null
+        : null
+      : null = null;
+
+    const viteReady = createViteServer({
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR !== 'true',
+      },
       appType: 'spa',
+    }).then((vite) => {
+      viteMiddleware = vite.middlewares;
+      console.log('[CivicFix Full-Stack] Vite dev middleware ready');
+      return vite;
     });
-    app.use(vite.middlewares);
+
+    app.use(async (req, res, next) => {
+      try {
+        if (!viteMiddleware) {
+          await viteReady;
+        }
+        if (viteMiddleware) {
+          return viteMiddleware(req, res, next);
+        }
+        next();
+      } catch (err) {
+        next(err);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath, {
@@ -80,4 +107,15 @@ async function startServer() {
   server.headersTimeout = 66000;
 }
 
-startServer();
+process.on('unhandledRejection', (reason) => {
+  console.warn('[CivicFix Server] Unhandled promise rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[CivicFix Server] Uncaught exception:', err);
+});
+
+startServer().catch((err) => {
+  console.error('[CivicFix Full-Stack] Fatal startup error:', err);
+  process.exit(1);
+});

@@ -28,7 +28,6 @@ interface OnboardingGatewayModalProps {
   onSelectRole: (role: UserRole) => void;
   defaultViewport?: 'desktop' | 'mobile';
   initialDeviceMode?: 'mobile' | 'desktop';
-  onOpenAuth?: (role: any) => void;
 }
 
 export const OnboardingGatewayModal: React.FC<OnboardingGatewayModalProps> = ({
@@ -37,7 +36,6 @@ export const OnboardingGatewayModal: React.FC<OnboardingGatewayModalProps> = ({
   onSelectRole,
   defaultViewport = 'desktop',
   initialDeviceMode,
-  onOpenAuth,
 }) => {
   const [viewMode, setViewMode] = useState<'desktop' | 'mobile'>(initialDeviceMode || defaultViewport);
   const [selectedLang, setSelectedLang] = useState<SupportedLanguage>(audibleNarrator.getLanguage());

@@ -36,8 +36,6 @@ interface HeaderProps {
   onTabChange: (tab: 'home' | 'portal' | 'report' | 'activity' | 'ranks' | 'admin') => void;
   currentUser: Contributor;
   userRole: UserRole;
-  isLoggedIn?: boolean;
-  onOpenAuthModal: (mode?: 'login' | 'register') => void;
   onToggleUserRole: () => void;
   onOpenProfile: () => void;
   onOpenHigherUpsHub?: () => void;
@@ -73,8 +71,6 @@ export const Header = ({
   onTabChange,
   currentUser,
   userRole,
-  isLoggedIn = true,
-  onOpenAuthModal,
   onToggleUserRole,
   onOpenProfile,
   onOpenHigherUpsHub,
@@ -704,30 +700,8 @@ export const Header = ({
             )}
           </div>
 
-          {/* Auth Button & User Profile Avatar */}
+          {/* User Profile Avatar */}
           <div className="flex items-center gap-1.5 shrink-0">
-            {!isLoggedIn ? (
-              <button
-                id="header-auth-action-btn"
-                onClick={() => onOpenAuthModal('login')}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-extrabold bg-[#EDF4FF] hover:bg-[#dfe9fa] text-[#0050c8] border border-[#dae2ff] transition-all cursor-pointer shadow-2xs shrink-0"
-                title="Sign in or Register"
-              >
-                <UserCheck className="w-3.5 h-3.5" />
-                <span>Sign In</span>
-              </button>
-            ) : (
-              <button
-                id="header-auth-action-btn"
-                onClick={() => onOpenAuthModal('login')}
-                className="hidden 2xl:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-bold bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-[#424655] dark:text-gray-200 border border-gray-200 dark:border-gray-700 transition-all cursor-pointer shadow-2xs shrink-0"
-                title="Switch Account"
-              >
-                <UserCheck className="w-3 h-3 text-[#0050c8]" />
-                <span>Switch</span>
-              </button>
-            )}
-
             <div
               id="header-user-avatar-btn"
               onClick={onOpenProfile}

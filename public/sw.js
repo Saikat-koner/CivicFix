@@ -1,5 +1,5 @@
 // CivicFix Service Worker - Offline Resilience & Asset Caching
-const CACHE_NAME = 'civicfix-v1';
+const CACHE_NAME = 'civicfix-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -39,6 +39,11 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
+  // Never intercept non-GET or cross-origin requests (e.g. map tiles, CDNs, geocoders)
+  if (request.method !== 'GET' || url.origin !== self.location.origin) {
+    return;
+  }
+
   // For API endpoints, prefer network first with graceful error handling
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
@@ -63,14 +68,15 @@ self.addEventListener('fetch', (event) => {
   // For navigation requests (HTML pages), try network first, then cache
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).catch(() => {
-        return caches.match('/index.html') || caches.match('/');
+      fetch(request).catch(async () => {
+        const cached = (await caches.match('/index.html')) || (await caches.match('/'));
+        return cached || new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } });
       })
     );
     return;
   }
 
-  // For static assets, try cache first, then network and cache response
+  // For same-origin static assets, try cache first, then network and cache response
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
       if (cachedResponse) {
@@ -86,8 +92,7 @@ self.addEventListener('fetch', (event) => {
         });
         return networkResponse;
       }).catch(() => {
-        // Fallback or ignore
-        return cachedResponse;
+        return new Response('', { status: 504 });
       });
     })
   );

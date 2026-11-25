@@ -36,11 +36,9 @@ import { EscalateModal } from './components/EscalateModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { AdminPortal } from './components/AdminPortal';
 import { AppointmentBookingModal } from './components/AppointmentBookingModal';
-import { AuthModal, AuthSuccessData } from './components/AuthModal';
 import { EmergencyHotlinesModal } from './components/EmergencyHotlinesModal';
 import { PrintableWorkOrderModal } from './components/PrintableWorkOrderModal';
 import { OnboardingGatewayModal } from './components/OnboardingGatewayModal';
-import { AuthGate } from './components/AuthGate';
 import { PeopleHomepage } from './components/PeopleHomepage';
 import { AudibleSubtitleBar } from './components/AudibleSubtitleBar';
 import { DatabaseDiagnosticsModal } from './components/DatabaseDiagnosticsModal';
@@ -61,11 +59,8 @@ import {
   clearOfflineQueue,
   isSimulatedOffline,
   setSimulatedOffline,
-  getCurrentSession,
-  clearCurrentSession,
   updateUserAvatar,
   updateUserContactVerification,
-  DEDICATED_ADMIN_ACCOUNT,
   getStoredOfficials,
   saveStoredOfficials
 } from './utils/storage';
@@ -95,15 +90,16 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
-const GUEST_USER_PROFILE: Contributor = {
-  rank: 99,
-  id: 'guest-visitor',
-  name: 'Guest Citizen',
+const DEFAULT_CITIZEN_PROFILE: Contributor = {
+  rank: 4,
+  id: 'citizen-open-user',
+  permanentUserId: 'CFX-OPEN-2026',
+  name: 'Citizen Contributor',
   avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=400&q=80',
   issuesResolved: 0,
-  civicCredits: 0,
+  civicCredits: 250,
   isCurrentUser: true,
-  badges: ['Visitor Mode'],
+  badges: ['Community Contributor', 'Open Access'],
 };
 
 /**
@@ -126,7 +122,11 @@ export default function App() {
   
   // Core Entities State
   const [issues, setIssues] = useState<CivicIssue[]>(INITIAL_ISSUES);
-  const [contributors, setContributors] = useState<Contributor[]>(INITIAL_CONTRIBUTORS);
+  const [contributors, setContributors] = useState<Contributor[]>(() =>
+    INITIAL_CONTRIBUTORS.some((c) => c.isCurrentUser)
+      ? INITIAL_CONTRIBUTORS
+      : [DEFAULT_CITIZEN_PROFILE, ...INITIAL_CONTRIBUTORS]
+  );
   const [quests, setQuests] = useState<CivicQuest[]>(INITIAL_QUESTS);
   const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL_NOTIFICATIONS);
   const [officials, setOfficials] = useState<HigherUpOfficial[]>(() => getStoredOfficials());
@@ -216,7 +216,6 @@ export default function App() {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showHigherUpsModal, setShowHigherUpsModal] = useState(false);
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(false);
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [showDbDiagnosticsModal, setShowDbDiagnosticsModal] = useState(false);
   const [showFreeApiModal, setShowFreeApiModal] = useState(false);
@@ -309,48 +308,13 @@ export default function App() {
     }
   }, [currentTab]);
   const [workOrderIssue, setWorkOrderIssue] = useState<CivicIssue | null>(null);
-  const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | 'forgot'>('login');
-  const [authInitialRole, setAuthInitialRole] = useState<UserRole>('citizen');
-  const [authPromptMessage, setAuthPromptMessage] = useState<string | null>(null);
-  const [resetTokenParam, setResetTokenParam] = useState<string | null>(null);
-  const [resetEmailParam, setResetEmailParam] = useState<string | null>(null);
-  const pendingAuthActionRef = useRef<(() => void) | null>(null);
-
-  // Auto-detect ?reset_token=..., ?auth_mode=forgot, ?forgot=true, or #forgot-password in URL
-  useEffect(() => {
-    try {
-      const urlParams = new URLSearchParams(window.location.search);
-      const token = urlParams.get('reset_token');
-      const email = urlParams.get('email');
-      const mode = urlParams.get('auth_mode') || urlParams.get('auth');
-      const isForgotHash = window.location.hash === '#forgot' || window.location.hash === '#forgot-password';
-      const isLoginHash = window.location.hash === '#login' || window.location.hash === '#signin';
-
-      if (token) {
-        setResetTokenParam(token);
-        if (email) setResetEmailParam(email);
-        setAuthModalMode('forgot');
-        setShowAuthModal(true);
-      } else if (mode === 'forgot' || urlParams.has('forgot') || isForgotHash) {
-        if (email) setResetEmailParam(email);
-        setAuthModalMode('forgot');
-        setShowAuthModal(true);
-      } else if (mode === 'login' || isLoginHash) {
-        setAuthModalMode('login');
-        setShowAuthModal(true);
-      }
-    } catch {
-      // URL parsing fallback
-    }
-  }, []);
 
   // Gateway States
   const [showOnboardingGateway, setShowOnboardingGateway] = useState(false);
   const [onboardingDeviceMode, setOnboardingDeviceMode] = useState<'desktop' | 'mobile'>('desktop');
-  
-  // Auth Session State
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userEmail, setUserEmail] = useState('');
+
+  // Open Citizen Context (no login or signup required)
+  const [userEmail, setUserEmail] = useState('citizen@civicfix.gov.in');
   const [userDistrict, setUserDistrict] = useState('Bengaluru Central (Ward 112)');
   const [userPhone, setUserPhone] = useState('');
 
@@ -467,42 +431,10 @@ export default function App() {
         if (stored.issues && stored.issues.length > 0) setIssues(stored.issues);
         if (stored.appointments && stored.appointments.length > 0) setAppointments(stored.appointments);
         if (stored.grievances && stored.grievances.length > 0) setGrievances(stored.grievances);
-        if (stored.contributors && stored.contributors.length > 0) setContributors(stored.contributors);
-      }
-
-      // Check current session
-      const currentSession = getCurrentSession();
-      if (currentSession) {
-        setIsLoggedIn(true);
-        setUserRole(currentSession.role);
-        setUserEmail(currentSession.email);
-        setUserDistrict(currentSession.district);
-        if (currentSession.phone) setUserPhone(currentSession.phone);
-
-        // Acquire live location for restored user session and point at it
-        getCurrentLivePosition().then((livePos) => {
-          setUserLiveLocation(livePos);
-          setPointAtUserLocationOnly(true);
-          setFlyToUserTrigger(Date.now());
-          if (livePos.district) setUserDistrict(livePos.district);
-        }).catch(() => {
-          // Fallback
-        });
-
-        // Update contributor list with user session
-        setContributors((prev) => {
-          const exists = prev.find((c) => c.id === currentSession.user.id);
-          if (exists) {
-            return prev.map((c) => ({
-              ...c,
-              isCurrentUser: c.id === currentSession.user.id,
-            }));
-          }
-          return [
-            ...prev.map((c) => ({ ...c, isCurrentUser: false })),
-            { ...currentSession.user, isCurrentUser: true },
-          ];
-        });
+        if (stored.contributors && stored.contributors.length > 0) {
+          const hasCurrent = stored.contributors.some((c: Contributor) => c.isCurrentUser);
+          setContributors(hasCurrent ? stored.contributors : [DEFAULT_CITIZEN_PROFILE, ...stored.contributors]);
+        }
       }
 
       // Check if there are queued offline reports from when user was disconnected
@@ -604,146 +536,11 @@ export default function App() {
     mode: 'reopen',
   });
 
-  const loggedInCitizenUser = contributors.find((c) => c.isCurrentUser);
-  const activeUser = isLoggedIn
-    ? userRole === 'admin'
+  const currentCitizenUser = contributors.find((c) => c.isCurrentUser);
+  const activeUser =
+    userRole === 'admin'
       ? ADMIN_USER_PROFILE
-      : (loggedInCitizenUser || GUEST_USER_PROFILE)
-    : GUEST_USER_PROFILE;
-
-  // Open Auth Modal helper
-  const handleOpenAuthModal = (
-    mode: 'login' | 'register' | 'forgot' = 'login',
-    role: UserRole = 'citizen',
-    prompt: string | null = null
-  ) => {
-    setAuthModalMode(mode);
-    setAuthInitialRole(role);
-    setAuthPromptMessage(prompt);
-    setShowAuthModal(true);
-  };
-
-  // Auth Guard Helper
-  const requireAuth = (
-    action: () => void,
-    requiredRole: UserRole = 'citizen',
-    promptText?: string
-  ) => {
-    if (!isLoggedIn) {
-      pendingAuthActionRef.current = action;
-      handleOpenAuthModal('login', requiredRole, promptText || 'Please sign in or register an account to perform this action.');
-      return;
-    }
-
-    if (requiredRole === 'admin' && userRole !== 'admin') {
-      pendingAuthActionRef.current = action;
-      handleOpenAuthModal('login', 'admin', promptText || 'Official Municipal Administrator credentials are required for City Hall Admin Command.');
-      return;
-    }
-
-    action();
-  };
-
-  // Handle Login / Registration completion
-  const handleAuthSuccess = (data: AuthSuccessData) => {
-    setIsLoggedIn(true);
-    setUserRole(data.role);
-    setUserEmail(data.email);
-    setUserDistrict(data.district);
-    if (data.phone) setUserPhone(data.phone);
-
-    // Update contributor list to mark the authenticated user as active
-    setContributors((prev) => {
-      const existing = prev.find((c) => c.id === data.user.id);
-      if (existing) {
-        return prev.map((c) => ({
-          ...c,
-          isCurrentUser: c.id === data.user.id,
-        }));
-      }
-      return [
-        ...prev.map((c) => ({ ...c, isCurrentUser: false })),
-        { ...data.user, isCurrentUser: true },
-      ];
-    });
-
-    // Make map navigate to home, acquire live location, and point at that location only!
-    setCurrentTab('home');
-    setPointAtUserLocationOnly(true);
-
-    // Acquire live position immediately
-    getCurrentLivePosition().then((livePos) => {
-      setUserLiveLocation(livePos);
-      setFlyToUserTrigger(Date.now());
-      if (livePos.district) {
-        setUserDistrict(livePos.district);
-      }
-
-      // Add alert notification for location point
-      const locNotif: AppNotification = {
-        id: `notif-loc-${Date.now()}`,
-        type: 'community',
-        title: '📍 Map Pointed to Your Live Location',
-        desc: `Map is locked and pointing exclusively at your live location: ${livePos.address || `${livePos.lat.toFixed(4)}, ${livePos.lng.toFixed(4)}`}.`,
-        time: 'Just now',
-        unread: true,
-      };
-      setNotifications((prev) => [locNotif, ...prev]);
-    }).catch(() => {
-      setFlyToUserTrigger(Date.now());
-    });
-
-    // Add welcome notification
-    const welcomeNotif: AppNotification = {
-      id: `notif-${Date.now()}`,
-      type: 'reward',
-      title: `Welcome, ${data.user.name}!`,
-      desc: data.role === 'admin' 
-        ? 'Authenticated as Authorized City Commissioner. Map centered and pointing at your live location.'
-        : `Signed into CivicFix accredited network. Map pointing at your live location in ${data.district}.`,
-      time: 'Just now',
-      unread: true,
-      ccAmount: data.user.civicCredits,
-    };
-    setNotifications((prev) => [welcomeNotif, ...prev]);
-
-    // If an action was pending before login, trigger it
-    if (pendingAuthActionRef.current) {
-      const pendingAction = pendingAuthActionRef.current;
-      pendingAuthActionRef.current = null;
-      setTimeout(() => {
-        pendingAction();
-      }, 100);
-    }
-  };
-
-  // Sign out handler
-  const handleSignOut = () => {
-    clearCurrentSession();
-    setIsLoggedIn(false);
-    setUserRole('citizen');
-    setPointAtUserLocationOnly(false);
-    setUserLiveLocation(null);
-    setUserEmail('');
-    setUserPhone('');
-    setContributors((prev) =>
-      prev.map((c) => ({
-        ...c,
-        isCurrentUser: false,
-      }))
-    );
-    setCurrentTab('home');
-
-    const logoutNotif: AppNotification = {
-      id: `notif-${Date.now()}`,
-      type: 'status_change',
-      title: 'Signed Out of CivicFix Terminal',
-      desc: 'You have signed out. Sign in or register to submit reports and earn Civic Credits.',
-      time: 'Just now',
-      unread: true,
-    };
-    setNotifications((prev) => [logoutNotif, ...prev]);
-  };
+      : (currentCitizenUser || DEFAULT_CITIZEN_PROFILE);
 
   // Update user avatar across storage and active contributors
   const handleUpdateUserAvatar = (newAvatar: string) => {
@@ -767,117 +564,99 @@ export default function App() {
     setNotifications((prev) => [avatarNotif, ...prev]);
   };
 
-  // Toggle between Citizen & Admin Person
+  // Toggle between Citizen & Admin Persona (Open Access)
   const handleToggleUserRole = () => {
     if (userRole === 'citizen') {
-      requireAuth(
-        () => {
-          setUserRole('admin');
-          setCurrentTab('admin');
-          confetti({ particleCount: 35, spread: 45 });
-        },
-        'admin',
-        'Official Municipal Administrator credentials required to access Admin Dispatch.'
-      );
+      setUserRole('admin');
+      setCurrentTab('admin');
+      confetti({ particleCount: 35, spread: 45 });
     } else {
       setUserRole('citizen');
       setCurrentTab('home');
     }
   };
 
-  // Upvote / Confirm issue (Requires Auth)
+  // Upvote / Confirm issue (Open Access)
   const handleUpvote = (issueId: string) => {
-    requireAuth(
-      () => {
-        setIssues((prev) =>
-          prev.map((item) => {
-            if (item.id === issueId) {
-              const hasUpvoted = !item.hasUpvoted;
-              const upvotes = hasUpvoted ? item.upvotes + 1 : item.upvotes - 1;
-              return { ...item, upvotes, hasUpvoted };
-            }
-            return item;
-          })
-        );
-
-        // Sync with Express backend
-        apiClient.upvoteIssue(issueId, { userRole, userName: activeUser.name, userEmail })
-          .catch((err) => console.warn('Upvote sync error:', err));
-
-        // Vibration feedback on upvote
-        triggerVibration(25);
-
-        // Award +10 CC if upvoting
-        setContributors((prev) =>
-          prev.map((c) =>
-            c.isCurrentUser
-              ? { ...c, civicCredits: c.civicCredits + 10 }
-              : c
-          )
-        );
-
-        confetti({
-          particleCount: 40,
-          spread: 40,
-          origin: { y: 0.8 },
-          colors: ['#0050c8', '#10B981'],
-        });
-      },
-      'citizen',
-      'Please sign in or register to upvote and verify this civic report.'
+    setIssues((prev) =>
+      prev.map((item) => {
+        if (item.id === issueId) {
+          const hasUpvoted = !item.hasUpvoted;
+          const upvotes = hasUpvoted ? item.upvotes + 1 : item.upvotes - 1;
+          return { ...item, upvotes, hasUpvoted };
+        }
+        return item;
+      })
     );
+
+    // Sync with Express backend
+    apiClient.upvoteIssue(issueId, { userRole, userName: activeUser.name, userEmail })
+      .catch((err) => console.warn('Upvote sync error:', err));
+
+    // Vibration feedback on upvote
+    triggerVibration(25);
+
+    // Award +10 CC if upvoting
+    setContributors((prev) =>
+      prev.map((c) =>
+        c.isCurrentUser
+          ? { ...c, civicCredits: c.civicCredits + 10 }
+          : c
+      )
+    );
+
+    confetti({
+      particleCount: 40,
+      spread: 40,
+      origin: { y: 0.8 },
+      colors: ['#0050c8', '#10B981'],
+    });
   };
 
-  // Add Comment on Issue (Requires Auth)
+  // Add Comment on Issue (Open Access)
   const handleAddComment = (issueId: string, text: string) => {
-    requireAuth(
-      () => {
-        const newComment: IssueComment = {
-          id: `comm-${Date.now()}`,
-          author: activeUser.name,
-          avatar: activeUser.avatar,
-          timestamp: 'Just now',
-          text,
-          isOfficial: userRole === 'admin',
-          upvotes: 0,
-        };
+    const newComment: IssueComment = {
+      id: `comm-${Date.now()}`,
+      author: activeUser.name,
+      avatar: activeUser.avatar,
+      timestamp: 'Just now',
+      text,
+      isOfficial: userRole === 'admin',
+      upvotes: 0,
+    };
 
-        setIssues((prev) =>
-          prev.map((item) => {
-            if (item.id === issueId) {
-              const comments = item.comments ? [newComment, ...item.comments] : [newComment];
-              return { ...item, comments };
-            }
-            return item;
-          })
-        );
-
-        if (selectedIssue && selectedIssue.id === issueId) {
-          setSelectedIssue((prev) =>
-            prev ? { ...prev, comments: prev.comments ? [newComment, ...prev.comments] : [newComment] } : null
-          );
+    setIssues((prev) =>
+      prev.map((item) => {
+        if (item.id === issueId) {
+          const comments = item.comments ? [newComment, ...item.comments] : [newComment];
+          return { ...item, comments };
         }
-
-        // Sync comment with Express backend
-        apiClient.addComment(issueId, text, {
-          userRole,
-          userName: activeUser.name,
-          userEmail,
-          isOfficial: userRole === 'admin',
-          department: userRole === 'admin' ? 'BBMP Control Room' : undefined,
-        }).catch((err) => console.warn('Comment sync error:', err));
-
-        if (userRole === 'citizen') {
-          setContributors((prev) =>
-            prev.map((c) =>
-              c.isCurrentUser ? { ...c, civicCredits: c.civicCredits + 5 } : c
-            )
-          );
-        }
-      },
-      'citizen',
-      'Please sign in or register to post comments on civic reports.'
+        return item;
+      })
     );
+
+    if (selectedIssue && selectedIssue.id === issueId) {
+      setSelectedIssue((prev) =>
+        prev ? { ...prev, comments: prev.comments ? [newComment, ...prev.comments] : [newComment] } : null
+      );
+    }
+
+    // Sync comment with Express backend
+    apiClient.addComment(issueId, text, {
+      userRole,
+      userName: activeUser.name,
+      userEmail,
+      isOfficial: userRole === 'admin',
+      department: userRole === 'admin' ? 'BBMP Control Room' : undefined,
+    }).catch((err) => console.warn('Comment sync error:', err));
+
+    if (userRole === 'citizen') {
+      setContributors((prev) =>
+        prev.map((c) =>
+          c.isCurrentUser ? { ...c, civicCredits: c.civicCredits + 5 } : c
+        )
+      );
+    }
   };
 
   // Claim Quest Reward
@@ -2044,96 +1823,6 @@ export default function App() {
     return matchesCategory && matchesSearch && matchesStatus;
   });
 
-  // ================= HOMEPAGE FOR THE PEOPLE & CITIZEN AUTHENTICATION HUB =================
-  // Provides the full citizen landing portal with embedded Login & Registration
-  if (!isLoggedIn) {
-    return (
-      <div
-        id="civicfix-people-homepage-wrapper"
-        className="min-h-screen bg-[#f8f9ff] dark:bg-[#121620] text-[#121c28] dark:text-gray-100 flex flex-col font-sans selection:bg-[#1d68f2] selection:text-white"
-      >
-        <AudibleSubtitleBar />
-        <PeopleHomepage
-          onAuthSuccess={handleAuthSuccess}
-          onOpenHotlines={() => setShowEmergencyModal(true)}
-          isLoggedIn={false}
-          currentUser={activeUser}
-          onOpenPrivacy={() => {
-            setPrivacyTermsTab('privacy');
-            setShowPrivacyTermsModal(true);
-          }}
-          onOpenTerms={() => {
-            setPrivacyTermsTab('terms');
-            setShowPrivacyTermsModal(true);
-          }}
-          onOpenContact={() => {
-            setPrivacyTermsTab('contact');
-            setShowPrivacyTermsModal(true);
-          }}
-          onOpenCommandPalette={() => setShowCommandPalette(true)}
-          isDarkMode={isDarkMode}
-          onToggleTheme={() => setIsDarkMode((prev) => !prev)}
-        />
-        {showEmergencyModal && (
-          <EmergencyHotlinesModal
-            onClose={() => setShowEmergencyModal(false)}
-            onNavigateToMapWithPlace={handleNavigateToMapWithEmergencyPlace}
-          />
-        )}
-        <CommandPalette
-          isOpen={showCommandPalette}
-          onClose={() => setShowCommandPalette(false)}
-          issues={issues}
-          onSelectIssue={(issue) => setSelectedIssue(issue)}
-          onNavigateTab={(tab) => {
-            if (tab === 'feed') setCurrentTab('portal');
-            else if (tab === 'map') setCurrentTab('activity');
-            else if (tab === 'report') setCurrentTab('report');
-            else if (tab === 'leaderboard') setCurrentTab('ranks');
-            else if (tab === 'admin') setCurrentTab('admin');
-          }}
-          onOpenHotlines={() => setShowEmergencyModal(true)}
-          onToggleTheme={() => setIsDarkMode((prev) => !prev)}
-          isDarkMode={isDarkMode}
-          onOpenPrivacy={() => {
-            setPrivacyTermsTab('privacy');
-            setShowPrivacyTermsModal(true);
-          }}
-          onOpenTerms={() => {
-            setPrivacyTermsTab('terms');
-            setShowPrivacyTermsModal(true);
-          }}
-          onOpenFaq={() => {
-            setPrivacyTermsTab('terms');
-            setShowPrivacyTermsModal(true);
-          }}
-          onOpenApiModal={userRole === 'admin' ? () => setShowFreeApiModal(true) : undefined}
-          userRole={userRole}
-        />
-        <CookieBanner
-          onOpenPrivacy={() => {
-            setPrivacyTermsTab('privacy');
-            setShowPrivacyTermsModal(true);
-          }}
-        />
-        <PrivacyTermsModal
-          isOpen={showPrivacyTermsModal}
-          onClose={() => setShowPrivacyTermsModal(false)}
-          defaultTab={privacyTermsTab}
-        />
-        <BackToTopAndSupport
-          onOpenCommandPalette={() => setShowCommandPalette(true)}
-          onOpenHotlines={() => setShowEmergencyModal(true)}
-          onOpenFaq={() => {
-            setPrivacyTermsTab('terms');
-            setShowPrivacyTermsModal(true);
-          }}
-        />
-        <UndoToast toast={undoToast} onDismiss={() => setUndoToast(null)} />
-      </div>
-    );
-  }
-
   return (
     <div
       id="civicfix-app-root"
@@ -2146,44 +1835,17 @@ export default function App() {
       <Header
         currentTab={currentTab}
         onTabChange={(tab) => {
-          if (tab === 'report') {
-            requireAuth(
-              () => {
-                setSelectedIssue(null);
-                setNavigatingIssue(null);
-                setCurrentTab('report');
-              },
-              'citizen',
-              'Please sign in or register to submit an infrastructure hazard report.'
-            );
-          } else if (tab === 'admin') {
-            requireAuth(
-              () => {
-                setSelectedIssue(null);
-                setNavigatingIssue(null);
-                setCurrentTab('admin');
-              },
-              'admin',
-              'Official Municipal Administrator credentials required to access Dispatch Operations.'
-            );
-          } else {
-            setSelectedIssue(null);
-            setNavigatingIssue(null);
-            setCurrentTab(tab);
+          setSelectedIssue(null);
+          setNavigatingIssue(null);
+          if (tab === 'admin') {
+            setUserRole('admin');
           }
+          setCurrentTab(tab);
         }}
         currentUser={activeUser}
         userRole={userRole}
-        isLoggedIn={isLoggedIn}
-        onOpenAuthModal={(mode) => handleOpenAuthModal(mode)}
         onToggleUserRole={handleToggleUserRole}
-        onOpenProfile={() => {
-          if (!isLoggedIn) {
-            handleOpenAuthModal('login', 'citizen', 'Please sign in or register to access your Civic Profile.');
-          } else {
-            setShowProfileModal(true);
-          }
-        }}
+        onOpenProfile={() => setShowProfileModal(true)}
         onOpenEmergencyModal={() => setShowEmergencyModal(true)}
         onOpenDbDiagnostics={() => setShowDbDiagnosticsModal(true)}
         onOpenApiModal={() => setShowFreeApiModal(true)}
@@ -2237,11 +1899,7 @@ export default function App() {
             onNavigate={(issue) => setNavigatingIssue(issue)}
             onVoteResolution={handleVoteResolution}
             onOpenEscalate={(issue, mode) =>
-              requireAuth(
-                () => setEscalateState({ isOpen: true, issue, mode }),
-                'citizen',
-                'Please sign in or register to file a municipal escalation.'
-              )
+              setEscalateState({ isOpen: true, issue, mode })
             }
             onOpenWorkOrder={(issue) => setWorkOrderIssue(issue)}
             onUpvote={handleUpvote}
@@ -2250,11 +1908,15 @@ export default function App() {
         ) : currentTab === 'portal' ? (
           /* VIEW: HOMEPAGE FOR THE PEOPLE (PUBLIC CITIZEN REDRESSAL HUB) */
           <PeopleHomepage
-            onAuthSuccess={handleAuthSuccess}
             onOpenHotlines={() => setShowEmergencyModal(true)}
-            isLoggedIn={isLoggedIn}
             currentUser={activeUser}
             onGoToDashboard={() => setCurrentTab('home')}
+            onReportIssue={() => setCurrentTab('report')}
+            onOpenActivity={() => setCurrentTab('activity')}
+            onOpenAdmin={() => {
+              setUserRole('admin');
+              setCurrentTab('admin');
+            }}
             issues={issues}
             onSelectIssue={(issue) => {
               setSelectedIssue(issue);
@@ -2422,16 +2084,10 @@ export default function App() {
 
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={() =>
-                    requireAuth(
-                      () => {
-                        setAppointmentContext({});
-                        setShowAppointmentModal(true);
-                      },
-                      'citizen',
-                      'Please sign in or register to book an appointment with a City Official.'
-                    )
-                  }
+                  onClick={() => {
+                    setAppointmentContext({});
+                    setShowAppointmentModal(true);
+                  }}
                   className="px-3.5 py-2 bg-[#eef4ff] border border-[#dae2ff] text-[#0050c8] hover:bg-[#dae2ff] text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
                 >
                   <Calendar className="w-4 h-4 text-[#0050c8]" />
@@ -2580,13 +2236,7 @@ export default function App() {
             {/* Floating Action Button (FAB) for Reporting */}
             <button
               id="home-fab-report-button"
-              onClick={() =>
-                requireAuth(
-                  () => setCurrentTab('report'),
-                  'citizen',
-                  'Please sign in or register to report an infrastructure hazard.'
-                )
-              }
+              onClick={() => setCurrentTab('report')}
               className="fixed bottom-20 right-4 md:bottom-8 md:right-8 bg-[#0050c8] hover:bg-[#1d68f2] text-white rounded-full p-4 md:px-6 shadow-xl flex items-center justify-center gap-2.5 transition-all hover:scale-105 active:scale-95 z-30 ring-4 ring-white/50 cursor-pointer"
               aria-label="Report Issue"
             >
@@ -2602,31 +2252,12 @@ export default function App() {
         currentTab={currentTab}
         userRole={userRole}
         onTabChange={(tab) => {
-          if (tab === 'report') {
-            requireAuth(
-              () => {
-                setSelectedIssue(null);
-                setNavigatingIssue(null);
-                setCurrentTab('report');
-              },
-              'citizen',
-              'Please sign in or register to submit an infrastructure hazard report.'
-            );
-          } else if (tab === 'admin') {
-            requireAuth(
-              () => {
-                setSelectedIssue(null);
-                setNavigatingIssue(null);
-                setCurrentTab('admin');
-              },
-              'admin',
-              'Official Municipal Administrator credentials required to access Dispatch Operations.'
-            );
-          } else {
-            setSelectedIssue(null);
-            setNavigatingIssue(null);
-            setCurrentTab(tab);
+          setSelectedIssue(null);
+          setNavigatingIssue(null);
+          if (tab === 'admin') {
+            setUserRole('admin');
           }
+          setCurrentTab(tab);
         }}
       />
 
@@ -2670,29 +2301,8 @@ export default function App() {
           userRole={userRole}
           email={userEmail}
           district={userDistrict}
-          isLoggedIn={isLoggedIn}
           onClose={() => setShowProfileModal(false)}
-          onOpenAuthModal={(mode) => handleOpenAuthModal(mode)}
-          onSignOut={handleSignOut}
           onUpdateAvatar={handleUpdateUserAvatar}
-        />
-      )}
-
-      {/* MODAL 5: Login & Registration Interface */}
-      {showAuthModal && (
-        <AuthModal
-          isOpen={showAuthModal}
-          onClose={() => {
-            setShowAuthModal(false);
-            pendingAuthActionRef.current = null;
-            setResetTokenParam(null);
-            setResetEmailParam(null);
-          }}
-          onAuthSuccess={handleAuthSuccess}
-          initialMode={authModalMode}
-          initialRole={authInitialRole}
-          resetToken={resetTokenParam || undefined}
-          resetEmail={resetEmailParam || undefined}
         />
       )}
 
@@ -2725,12 +2335,6 @@ export default function App() {
             } else {
               setCurrentTab('home');
             }
-          }}
-          onOpenAuth={(role) => {
-            setShowOnboardingGateway(false);
-            setAuthInitialRole(role);
-            setAuthModalMode('login');
-            setShowAuthModal(true);
           }}
         />
       )}
@@ -2766,7 +2370,10 @@ export default function App() {
           else if (tab === 'map') setCurrentTab('activity');
           else if (tab === 'report') setCurrentTab('report');
           else if (tab === 'leaderboard') setCurrentTab('ranks');
-          else if (tab === 'admin') setCurrentTab('admin');
+          else if (tab === 'admin') {
+            setUserRole('admin');
+            setCurrentTab('admin');
+          }
         }}
         onOpenHotlines={() => setShowEmergencyModal(true)}
         onToggleTheme={() => setIsDarkMode((prev) => !prev)}

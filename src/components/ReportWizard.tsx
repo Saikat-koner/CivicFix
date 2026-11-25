@@ -71,8 +71,6 @@ import {
   LocationSelectionMode
 } from '../utils/liveLocation';
 import { Contributor, UserRole } from '../types';
-import { isUserContactVerified, isUserFirstCivicReport, isSmsVerified, markSmsVerified } from '../utils/storage';
-import { VerifyContactModal } from './VerifyContactModal';
 
 interface ReportWizardProps {
   onCancel: () => void;
@@ -661,33 +659,7 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
   const [showScanHud, setShowScanHud] = useState(true);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
-  // Contact verification gating state - "for sms check it if done then don't show again"
-  const [showVerifyContactModal, setShowVerifyContactModal] = useState(false);
-  const [isLocallyContactVerified, setIsLocallyContactVerified] = useState<boolean>(() =>
-    isUserContactVerified(currentUser, null, userPhone, userEmail) ||
-    isSmsVerified(userPhone || currentUser?.phone, userEmail || currentUser?.email, currentUser)
-  );
-
-  useEffect(() => {
-    if (
-      isUserContactVerified(currentUser, null, userPhone, userEmail) ||
-      isSmsVerified(userPhone || currentUser?.phone, userEmail || currentUser?.email, currentUser)
-    ) {
-      setIsLocallyContactVerified(true);
-    }
-  }, [currentUser, userPhone, userEmail]);
-
-  useEffect(() => {
-    const handleContactVerifiedEvent = () => {
-      setIsLocallyContactVerified(true);
-    };
-    window.addEventListener('civicfix-contact-verified', handleContactVerifiedEvent);
-    window.addEventListener('civicfix-sms-verified', handleContactVerifiedEvent);
-    return () => {
-      window.removeEventListener('civicfix-contact-verified', handleContactVerifiedEvent);
-      window.removeEventListener('civicfix-sms-verified', handleContactVerifiedEvent);
-    };
-  }, []);
+  // Open reporting: no login or contact OTP verification required
 
   // Synchronize audio speech status and provide Esc key shortcut to stop audio
   useEffect(() => {
@@ -716,8 +688,7 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
     setIsSpeaking(false);
   }, [currentStep]);
 
-  const isFirstCivicReport = isUserFirstCivicReport(currentUser, existingIssues, userPhone, userEmail);
-  const requiresContactVerification = !isLocallyContactVerified && isFirstCivicReport;
+
 
   // Duplicate suppression state
   const [forceSimulateDuplicate, setForceSimulateDuplicate] = useState(false);
@@ -1760,12 +1731,6 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
       colors: ['#1d68f2', '#10B981', '#f88400'],
     });
 
-    const finalContactPhone = overrideContact?.phone || userPhone || currentUser?.phone || '';
-    const finalContactEmail = overrideContact?.email || userEmail || currentUser?.email || '';
-    if (finalContactPhone || finalContactEmail) {
-      markSmsVerified(finalContactPhone, finalContactEmail);
-    }
-    setIsLocallyContactVerified(true);
 
     onSubmit({
       title,
@@ -1788,16 +1753,6 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
     });
   };
 
-  const handleContactVerificationSuccess = (contactData: { email: string; phone: string }) => {
-    // Permanently mark SMS verification as done so it will NEVER be prompted or shown again
-    markSmsVerified(contactData.phone, contactData.email);
-    setIsLocallyContactVerified(true);
-    setShowVerifyContactModal(false);
-    onContactVerified?.(contactData.email, contactData.phone);
-    // Proceed directly to submit the verified first civic report!
-    executeReportSubmission(contactData);
-  };
-
   const handleFinalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setDescriptionError(null);
@@ -1815,13 +1770,6 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
       setDescriptionError(
         `Defect description exceeds 1000 words (currently ${finalWordCount} words). Please keep your description within 1000 words.`
       );
-      return;
-    }
-
-    // Gated Contact Verification: First-time reporters MUST confirm email and phone using 6-digit code
-    if (requiresContactVerification) {
-      soundFX.playClick();
-      setShowVerifyContactModal(true);
       return;
     }
 
@@ -3416,80 +3364,24 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
             </div>
           </div>
 
-          {/* Contact Verification Notice / Banner for 1st-Time Civic Report */}
-          {requiresContactVerification ? (
-            <div
-              id="contact-verification-required-banner"
-              className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border-2 border-amber-300 shadow-sm space-y-3 animate-in fade-in duration-200"
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
-                    <ShieldCheck className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-black uppercase tracking-wider text-amber-900">
-                        Contact Verification Required
-                      </span>
-                      <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900">
-                        First-Time Civic Report
-                      </span>
-                    </div>
-                    <p className="text-xs text-amber-800 mt-1 max-w-xl leading-relaxed">
-                      Municipal public works protocol requires one-time 6-digit authentication of your email and phone number before submitting your first infrastructure report.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  id="open-contact-verification-btn"
-                  onClick={() => {
-                    soundFX.playClick();
-                    setShowVerifyContactModal(true);
-                  }}
-                  className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-black text-xs shadow-xs flex items-center justify-center gap-2 shrink-0 cursor-pointer transition-all"
-                >
-                  <Smartphone className="w-4 h-4" />
-                  <span>Verify Contact with 6-Digit Code</span>
-                </button>
+          {/* Open Public Reporting Banner */}
+          <div
+            id="open-public-reporting-banner"
+            className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-2xl flex items-center justify-between gap-3 text-xs"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-4 h-4" />
               </div>
-
-              <div className="flex items-center gap-3 pt-2.5 border-t border-amber-200/70 text-xs text-amber-800 flex-wrap">
-                <div className="flex items-center gap-1.5">
-                  <Mail className="w-3.5 h-3.5 text-amber-600" />
-                  <span className="text-[11px]">
-                    Email: <strong>{currentUser?.email || userEmail || 'Enter during verification'}</strong>
-                  </span>
-                </div>
-                <span className="text-amber-400">•</span>
-                <div className="flex items-center gap-1.5">
-                  <Smartphone className="w-3.5 h-3.5 text-amber-600" />
-                  <span className="text-[11px]">
-                    Phone: <strong>{currentUser?.phone || userPhone || 'Enter during verification'}</strong>
-                  </span>
-                </div>
+              <div>
+                <p className="font-extrabold text-emerald-900">Instant Public Reporting Enabled</p>
+                <p className="text-[11px] text-emerald-700">No login or signup needed — submit directly to municipal dispatch.</p>
               </div>
             </div>
-          ) : (
-            <div
-              id="contact-verified-badge-banner"
-              className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-2xl flex items-center justify-between gap-3 text-xs"
-            >
-              <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0">
-                  <CheckCircle2 className="w-4 h-4" />
-                </div>
-                <div>
-                  <p className="font-extrabold text-emerald-900">Contact Information Verified & Authenticated</p>
-                  <p className="text-[11px] text-emerald-700">Email & Mobile authorized for civic emergency response.</p>
-                </div>
-              </div>
-              <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-emerald-200/70 text-emerald-900">
-                Verified Citizen
-              </span>
-            </div>
-          )}
+            <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-emerald-200/70 text-emerald-900">
+              Open Access
+            </span>
+          </div>
 
           {/* Desktop Split-Screen Suite or Mobile Card View */}
           <div className={`grid gap-6 ${step3Layout === 'desktop' ? 'grid-cols-1 lg:grid-cols-12' : 'grid-cols-1'}`}>
@@ -4020,23 +3912,10 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
             <button
               type="submit"
               id="submit-civic-report-btn"
-              className={`${
-                requiresContactVerification
-                  ? 'bg-amber-600 hover:bg-amber-700'
-                  : 'bg-[#10B981] hover:bg-[#059669]'
-              } text-white font-extrabold text-sm px-8 py-3.5 rounded-full flex items-center gap-2 shadow-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer`}
+              className="bg-[#10B981] hover:bg-[#059669] text-white font-extrabold text-sm px-8 py-3.5 rounded-full flex items-center gap-2 shadow-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer"
             >
-              {requiresContactVerification ? (
-                <>
-                  <ShieldCheck className="w-5 h-5" />
-                  <span>Verify Contact & Submit Report</span>
-                </>
-              ) : (
-                <>
-                  <Check className="w-5 h-5" />
-                  <span>Submit Civic Report</span>
-                </>
-              )}
+              <Check className="w-5 h-5" />
+              <span>Submit Civic Report</span>
             </button>
           </div>
         </form>
@@ -4279,18 +4158,6 @@ export const ReportWizard: React.FC<ReportWizardProps> = ({
         </div>
       )}
 
-      {/* GATED VERIFY CONTACT MODAL FOR 1ST CIVIC REPORT */}
-      <VerifyContactModal
-        isOpen={showVerifyContactModal}
-        onClose={() => setShowVerifyContactModal(false)}
-        onSuccess={handleContactVerificationSuccess}
-        initialEmail={currentUser?.email || userEmail || ''}
-        initialPhone={currentUser?.phone || userPhone || ''}
-        userName={currentUser?.name || 'Resident'}
-        userId={currentUser?.id || currentUser?.permanentUserId || ''}
-        reportTitle={title || 'Civic Infrastructure Hazard Report'}
-        isFirstReport={isFirstCivicReport}
-      />
     </main>
   );
 };
